@@ -43,8 +43,35 @@ const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(['page_visit', 'cta_click
 const PAGE_SIZE = 1000;
 const MAX_EVENTS = 20000;
 
-const MISSING_KEY_MESSAGE =
-  'Supabase rejected the request (401). Add SUPABASE_ANON_KEY to your hosting environment variables and redeploy. Events are NOT being saved until then.';
+/**
+ * Reads the Supabase anon/publishable key from the environment.
+ * SUPABASE_ANON_KEY is the primary name; common aliases are accepted so a
+ * differently-named variable in the hosting dashboard doesn't silently break saving.
+ */
+function getAnonKey(): string | undefined {
+  const raw =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    '';
+  const key = raw.trim();
+  return key || undefined;
+}
+
+/** apikey/Authorization headers. New-style `sb_...` keys are not JWTs, so they must NOT be sent as a Bearer token. */
+function getAuthHeaders(anonKey: string): Record<string, string> {
+  const headers: Record<string, string> = { apikey: anonKey };
+  if (!anonKey.startsWith('sb_')) {
+    headers.Authorization = `Bearer ${anonKey}`;
+  }
+  return headers;
+}
+
+function unauthorizedMessage(): string {
+  return getAnonKey()
+    ? 'Supabase rejected the request (401). SUPABASE_ANON_KEY is set but invalid or disabled. Copy a current anon/publishable key from Supabase > Project Settings > API Keys, update it in your hosting environment variables and redeploy. Events are NOT being saved until then.'
+    : 'Supabase rejected the request (401). Add SUPABASE_ANON_KEY to your hosting environment variables and redeploy. Events are NOT being saved until then.';
+}
 
 function toRow(event: AnalyticsEvent): SupabaseEventRow {
   return {
@@ -110,10 +137,9 @@ function getSupabaseHeaders(extra?: Record<string, string>): Record<string, stri
     'Content-Type': 'application/json',
     ...extra,
   };
-  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  const anonKey = getAnonKey();
   if (anonKey) {
-    headers.apikey = anonKey;
-    headers.Authorization = `Bearer ${anonKey}`;
+    Object.assign(headers, getAuthHeaders(anonKey));
   }
   return headers;
 }
@@ -133,7 +159,7 @@ export function getSupabaseSyncInfo(): SupabaseSyncInfo {
 }
 
 async function syncSnapshotToPublicStorage(events: AnalyticsEvent[]): Promise<boolean> {
-  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  const anonKey = getAnonKey();
   if (!anonKey) return false;
   try {
     const res = await fetch(
@@ -141,8 +167,7 @@ async function syncSnapshotToPublicStorage(events: AnalyticsEvent[]): Promise<bo
       {
         method: 'POST',
         headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
+          ...getAuthHeaders(anonKey),
           'Content-Type': 'application/json',
           'x-upsert': 'true',
         },
@@ -212,7 +237,7 @@ export async function getAllAnalyticsEvents(): Promise<AnalyticsEvent[]> {
         }
       }
 
-      setSyncStatus('local-fallback', MISSING_KEY_MESSAGE);
+      setSyncStatus('local-fallback', unauthorizedMessage());
       return local.events;
     }
 
@@ -256,7 +281,7 @@ export async function appendAnalyticsEvent(event: AnalyticsEvent): Promise<Analy
       setSyncStatus('supabase-rest', `Connected to ${SUPABASE_ANALYTICS_TABLE} on Supabase REST.`);
       void syncSnapshotToPublicStorage(store.events);
     } else if (res.status === 401) {
-      setSyncStatus('local-fallback', MISSING_KEY_MESSAGE);
+      setSyncStatus('local-fallback', unauthorizedMessage());
     }
   } catch {
     // Graceful local store retention when Supabase is not reachable
@@ -283,7 +308,7 @@ export async function resetAnalyticsStore(): Promise<AnalyticsEvent[]> {
       setSyncStatus('supabase-rest', 'Cleared all events from Supabase.');
       void syncSnapshotToPublicStorage(store.events);
     } else if (delRes.status === 401) {
-      setSyncStatus('local-fallback', MISSING_KEY_MESSAGE);
+      setSyncStatus('local-fallback', unauthorizedMessage());
     }
   } catch {
     // Local store cleared regardless
@@ -298,7 +323,7 @@ export async function verifySupabaseAdminIdTable(
 ): Promise<boolean> {
   const trimmedUser = username.trim();
   if (!trimmedUser || !password) return false;
-  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  const anonKey = getAnonKey();
   if (!anonKey) return false;
 
   try {
