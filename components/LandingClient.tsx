@@ -123,12 +123,6 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
         isOpen={checkoutOpen}
         pricing={pricing}
         onClose={() => setCheckoutOpen(false)}
-        onPurchaseComplete={(amountUsd) => {
-          void trackAnalyticsEvent({
-            type: 'checkout_submit',
-            revenueUsd: amountUsd,
-          });
-        }}
       />
     </div>
   );
