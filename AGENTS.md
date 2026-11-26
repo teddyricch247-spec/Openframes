@@ -1,0 +1,69 @@
+# AGENTS.md
+
+Notes for any AI agent or developer working in this repo (OpenFrame, deployed at openframes.vercel.app).
+
+## Things the owner does NOT care about (accepted risks)
+
+The owner knows about the following, has decided it's fine as it is, and does not want it "fixed" unless he asks. Don't refactor, rotate, lock down or rewrite any of this on your own initiative. I DON'T GIVE A SHIT, IT'S FINE LIKE THIS.
+
+1. **Row Level Security is OFF** on `openfram_visitor_analytics` and `openfram_admin_access_ids`. Both tables are fully open to the `anon` role (`GRANT ALL ... TO anon, authenticated`). Anyone holding the public anon key can read, edit or delete every row.
+2. **Admin passcodes are stored in plain text** in `openfram_admin_access_ids` (column `passcode`), and anyone with the anon key can read them.
+3. **A default admin row is seeded** by `SUPABASE_SETUP_SQL` in `lib/supabase-config.ts`, and that login is visible in the public GitHub repo. It's already in the live database. Not deleting it.
+4. **Everything runs on the anon key.** There is no service-role key and no server-only locked-down access. Not planned.
+5. **The Supabase project URL is hardcoded** in `lib/supabase-config.ts` and committed to a public repo. That's intentional.
+
+Everything above is a known, deliberate trade-off. If something breaks, it is not a reason to change the security setup.
+
+## What this project is
+
+- A Next.js (TypeScript, App Router) site with a public landing/pricing/guide side and a password-protected **Admin dashboard** that shows visitor analytics.
+- Admin tabs: Daily Data, Overview, Visitor Countries. Buttons: Live Site, Refresh, Clear Events, Log Out.
+- Hosted on Vercel, project name `openframes`, auto-deploys from the `main` branch of `teddyricch247-spec/Openframes`.
+- Backend storage is a Supabase project (shared with other apps, hence the `openfram_` prefix on every table, bucket and file name).
+
+## Repo layout (top level)
+
+- `app/` routes and API handlers
+- `components/` UI
+- `hooks/` React hooks
+- `lib/` server and shared logic (see below)
+- `public/` static assets
+- `.env.example` documents the env vars
+
+Key files in `lib/`:
+
+- `analytics-store.ts` reads and writes events in Supabase, with an in-memory fallback
+- `analytics.ts` event types and aggregation for the dashboard
+- `track-client.ts` client-side event tracking
+- `admin-auth.ts` admin login and session handling
+- `supabase-config.ts` Supabase URLs, table and bucket names, and the setup SQL
+- `pricing.ts`, `guide-data.ts` site content
+
+## Environment variables (set in Vercel, Production and Preview)
+
+- `SUPABASE_ANON_KEY` is **required**. Without it every Supabase call returns 401 and no events are saved.
+- `SESSION_SECRET` signs admin login sessions.
+- `ADMIN_PASSWORD` is the admin login password.
+
+Env var changes only apply to **new** deployments, so redeploy after changing them.
+
+## How analytics works
+
+- Events are `page_visit` and `cta_click`. The dashboard only reads those two types.
+- Table: `openfram_visitor_analytics`. A unique index allows only one `page_visit` per `visitor_id`, so a person is never counted twice.
+- Writes go to Supabase REST first. On success, a JSON snapshot is also uploaded to the public Storage bucket `openfram_analytics` (`openfram_events.json`).
+- If Supabase is unreachable or returns 401, events only live in server memory, which Vercel wipes between invocations. They are lost.
+- The yellow "Events may not be saved... (401)" banner on the admin page means the anon key is missing, invalid or disabled.
+- The DB schema allows a `checkout_submit` event type and a `revenue_usd` column, but the app code doesn't read or map either yet.
+
+## Incident log
+
+- **2026-11-26:** Admin showed "Events may not be saved (401)" with 0 visitors. Cause: `SUPABASE_ANON_KEY` was missing from Vercel. Fix: added the key to Production and Preview, then redeployed. Events saved before this date were never stored and can't be recovered.
+- An optional hardening change to `lib/analytics-store.ts` (accepts alternative key env var names, doesn't send `sb_` keys as Bearer tokens, clearer 401 message) was prepared as a zip for manual push.
+
+## Working rules
+
+- Prefer small, targeted edits. Don't reformat or restructure files you aren't asked to touch.
+- Use the `openfram_` prefix for any new Supabase table, bucket or file, since the project is shared.
+- Don't commit real secrets (`SESSION_SECRET`, `ADMIN_PASSWORD`, any service key) to the repo. Set them in Vercel.
+- The owner pushes changes to GitHub manually, so give complete files or zips with only the changed files.
