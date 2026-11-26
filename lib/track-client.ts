@@ -73,7 +73,6 @@ export async function trackAnalyticsEvent(payload: {
   type: AnalyticsEventType;
   buttonId?: CrucialButtonId;
   metadata?: string;
-  revenueUsd?: number;
 }): Promise<void> {
   if (typeof window === 'undefined') return;
 
@@ -109,7 +108,6 @@ export async function trackAnalyticsEvent(payload: {
         referrer,
         buttonId: payload.buttonId,
         metadata: payload.metadata,
-        revenueUsd: payload.revenueUsd,
       }),
       keepalive: true,
     });
