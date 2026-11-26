@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
   ArrowLeft,
   BarChart3,
+  CalendarDays,
   Check,
   Copy,
   Database,
@@ -13,7 +15,6 @@ import {
   LogOut,
   MousePointerClick,
   RefreshCw,
-  RotateCcw,
   Search,
   Trash2,
   TrendingUp,
@@ -21,9 +22,10 @@ import {
 } from 'lucide-react';
 import type { AnalyticsSummary } from '@/lib/analytics';
 import type { SupabaseSyncInfo } from '@/lib/analytics-store';
+import DailyActivity from './DailyActivity';
 
-type AdminView = 'overview' | 'countries' | 'buttons' | 'events' | 'supabase';
-type EventTypeFilter = 'all' | 'page_visit' | 'cta_click' | 'checkout_submit';
+type AdminView = 'daily' | 'overview' | 'countries' | 'buttons' | 'events' | 'supabase';
+type EventTypeFilter = 'all' | 'page_visit' | 'cta_click';
 
 interface AdminDashboardClientProps {
   initialSummary: AnalyticsSummary;
@@ -44,17 +46,19 @@ function formatEventTimestamp(iso: string): string {
   });
 }
 
-function eventTypeLabel(type: 'page_visit' | 'cta_click' | 'checkout_submit'): {
+function eventTypeLabel(type: 'page_visit' | 'cta_click'): {
   label: string;
   tone: string;
 } {
-  if (type === 'checkout_submit') {
-    return { label: 'Purchase ($17)', tone: 'text-emerald-700 font-semibold' };
-  }
   if (type === 'cta_click') {
     return { label: 'Button Click', tone: 'text-amber-700 font-medium' };
   }
   return { label: 'Page Visit', tone: 'text-slate-700 font-medium' };
+}
+
+function analyticsUrl(): string {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  return `/api/analytics?tz=${encodeURIComponent(tz)}`;
 }
 
 export default function AdminDashboardClient({
@@ -66,7 +70,7 @@ export default function AdminDashboardClient({
   const router = useRouter();
   const [summary, setSummary] = useState<AnalyticsSummary>(initialSummary);
   const [supabaseSync, setSupabaseSync] = useState<SupabaseSyncInfo>(initialSupabaseSync);
-  const [activeView, setActiveView] = useState<AdminView>('overview');
+  const [activeView, setActiveView] = useState<AdminView>('daily');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,7 +81,7 @@ export default function AdminDashboardClient({
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/analytics', { cache: 'no-store' });
+      const res = await fetch(analyticsUrl(), { cache: 'no-store' });
       if (res.status === 401) {
         router.push('/login');
         router.refresh();
@@ -96,7 +100,7 @@ export default function AdminDashboardClient({
 
   useEffect(() => {
     let active = true;
-    fetch('/api/analytics', { cache: 'no-store' })
+    fetch(analyticsUrl(), { cache: 'no-store' })
       .then(async (res) => {
         if (res.status === 401) {
           router.push('/login');
@@ -119,22 +123,27 @@ export default function AdminDashboardClient({
     };
   }, [router]);
 
-  const handleReset = async (mode: 'empty' | 'reseed') => {
+  const handleClear = async () => {
+    const confirmed = window.confirm(
+      'Delete every recorded visit and click? This permanently clears the analytics table and cannot be undone.'
+    );
+    if (!confirmed) return;
+
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await fetch(`/api/analytics?mode=${mode}`, { method: 'DELETE' });
+      const res = await fetch(analyticsUrl(), { method: 'DELETE' });
       if (res.status === 401) {
         router.push('/login');
         router.refresh();
         return;
       }
-      if (!res.ok) throw new Error('Failed to reset store');
+      if (!res.ok) throw new Error('Failed to clear events');
       const data = (await res.json()) as AnalyticsSummary & { supabaseSync?: SupabaseSyncInfo };
       setSummary(data);
       if (data.supabaseSync) setSupabaseSync(data.supabaseSync);
     } catch {
-      setErrorMessage('Unable to update analytics store.');
+      setErrorMessage('Unable to clear analytics events.');
     } finally {
       setIsLoading(false);
     }
@@ -178,15 +187,21 @@ export default function AdminDashboardClient({
     });
   }, [summary.recentEvents, searchQuery, eventFilter]);
 
-  const maxTimelineVisits = Math.max(1, ...summary.timeline.map((b) => b.visits));
+  const today = summary.daily.length > 0 ? summary.daily[summary.daily.length - 1] : null;
+  const last7 = summary.daily.slice(-7);
+  const last7Visitors = last7.reduce((total, d) => total + d.newVisitors, 0);
+  const last7Clicks = last7.reduce((total, d) => total + d.buttonClicks, 0);
 
   const navItems: Array<{ id: AdminView; label: string; icon: typeof BarChart3 }> = [
+    { id: 'daily', label: 'Daily Data', icon: CalendarDays },
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'countries', label: 'Visitor Countries', icon: Globe },
     { id: 'buttons', label: 'Crucial Buttons', icon: MousePointerClick },
     { id: 'events', label: 'Visit & Click Log', icon: Users },
     { id: 'supabase', label: 'Supabase SQL & Sync', icon: Database },
   ];
+
+  const hasNoEvents = summary.totalVisits === 0 && summary.recentEvents.length === 0;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 lg:flex">
@@ -239,7 +254,7 @@ export default function AdminDashboardClient({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         {/* Top Bar with Breadcrumb & Primary Controls */}
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3.5 sm:px-8">
           <div className="flex items-center gap-2 text-sm">
@@ -269,16 +284,7 @@ export default function AdminDashboardClient({
             </button>
             <button
               type="button"
-              onClick={() => void handleReset('reseed')}
-              disabled={isLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Restore Demo Data</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleReset('empty')}
+              onClick={() => void handleClear()}
               disabled={isLoading}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
             >
@@ -307,71 +313,90 @@ export default function AdminDashboardClient({
             </div>
           )}
 
+          {supabaseSync.mode === 'local-fallback' && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                <span className="font-semibold">Events may not be saved.</span> {supabaseSync.message}
+              </p>
+            </div>
+          )}
+
           {/* KPI Summary Row */}
           <section aria-label="Key metrics" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Total Page Visits</span>
+                <span>Total Visitors</span>
                 <Users className="h-4 w-4 text-emerald-700" />
               </div>
               <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
                 {summary.totalVisits}
               </div>
               <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                {summary.uniqueVisitors} unique visitors · {summary.countriesCount} countries
+                {summary.uniqueVisitors} unique devices · {summary.countriesCount} countries
               </div>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Crucial Button Clicks</span>
+                <span>Today</span>
+                <CalendarDays className="h-4 w-4 text-emerald-700" />
+              </div>
+              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
+                {today?.newVisitors ?? 0}
+              </div>
+              <div className="mt-1 text-xs text-slate-600 tabular-nums">
+                new visitors · {today?.activeVisitors ?? 0} active · {today?.buttonClicks ?? 0} clicks
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Last 7 Days</span>
+                <TrendingUp className="h-4 w-4 text-emerald-700" />
+              </div>
+              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
+                {last7Visitors}
+              </div>
+              <div className="mt-1 text-xs text-slate-600 tabular-nums">
+                new visitors · {last7Clicks} button clicks
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
+                <span>Checkout Opens</span>
                 <MousePointerClick className="h-4 w-4 text-emerald-700" />
               </div>
               <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                {summary.crucialButtonClicks}
+                {summary.checkoutOpens}
               </div>
               <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                {summary.checkoutOpens} checkout opens · {summary.ctaClickRate}% CTA click rate
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Conversion Rate</span>
-                <TrendingUp className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-emerald-700 tabular-nums">
-                {summary.overallConversionRate}%
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                {summary.completedConversions} purchases · {summary.checkoutCompletionRate}% checkout
-                completion
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Black Friday Revenue</span>
-                <Globe className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                ${summary.estimatedRevenueUsd}
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                $17 sale price · {summary.completedConversions} guides sold
+                {summary.crucialButtonClicks} total button clicks · {summary.ctaClickRate}% of visitors
               </div>
             </div>
           </section>
 
-          {/* Empty State if cleared */}
-          {summary.totalVisits === 0 && summary.recentEvents.length === 0 ? (
+          {/* Daily activity: always available, even before the first event */}
+          {(activeView === 'daily' || activeView === 'overview') && (
+            <DailyActivity
+              daily={summary.daily}
+              timeZone={summary.timeZone}
+              showTable={activeView === 'daily'}
+            />
+          )}
+
+          {hasNoEvents && activeView !== 'daily' && activeView !== 'supabase' ? (
             <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
               <h2 className="font-display text-lg font-bold text-slate-950">
                 No visitor events recorded yet
               </h2>
               <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-                Visit the landing page and click a video placeholder or Black Friday CTA to see
-                live tracking appear here, or restore the sample dataset.
+                Open the landing page in a new browser and click a button. Real visits and clicks
+                appear here after a refresh.
               </p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <Link
@@ -380,130 +405,45 @@ export default function AdminDashboardClient({
                 >
                   Open Landing Page
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => void handleReset('reseed')}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                >
-                  Restore Demo Data
-                </button>
               </div>
             </div>
           ) : (
             <>
-              {/* Overview Charts: Daily Traffic + Funnel */}
+              {/* Conversion funnel (visitors to checkout opens) */}
               {activeView === 'overview' && (
-                <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                  {/* Daily Visits & Conversions Bar Chart */}
-                  <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-7">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="font-display text-base font-bold text-slate-950">
-                          Visits & Conversions by Day
-                        </h2>
-                        <p className="text-xs text-slate-500">
-                          Daily landing page traffic vs completed $17 purchases
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-slate-600">
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-200" />
-                          Visits
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-700" />
-                          Purchases
+                <section className="rounded-xl border border-slate-200 bg-white p-6">
+                  <h2 className="font-display text-base font-bold text-slate-950">
+                    Visitor to Checkout Funnel
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    How many visitors reached each step. Payments are not tracked.
+                  </p>
+
+                  <div className="mt-6 space-y-5">
+                    <div>
+                      <div className="flex justify-between text-xs font-medium">
+                        <span className="text-slate-700">1. Visitors</span>
+                        <span className="font-mono font-bold text-slate-950 tabular-nums">
+                          {summary.totalVisits} (100%)
                         </span>
                       </div>
-                    </div>
-
-                    <div className="mt-6 flex h-44 items-end gap-4 border-b border-slate-200 pb-2">
-                      {summary.timeline.map((bucket) => {
-                        const visitPct = Math.round((bucket.visits / maxTimelineVisits) * 100);
-                        const convPct = Math.round((bucket.conversions / maxTimelineVisits) * 100);
-                        return (
-                          <div
-                            key={bucket.label}
-                            className="flex flex-1 flex-col items-center justify-end gap-1.5 h-full"
-                          >
-                            <div className="flex w-full max-w-[44px] items-end justify-center gap-1 h-full">
-                              <div
-                                title={`${bucket.visits} visits`}
-                                className="w-1/2 rounded-t bg-emerald-200 transition-all"
-                                style={{ height: `${Math.max(8, visitPct)}%` }}
-                              />
-                              <div
-                                title={`${bucket.conversions} purchases`}
-                                className="w-1/2 rounded-t bg-emerald-700 transition-all"
-                                style={{ height: `${bucket.conversions > 0 ? Math.max(8, convPct) : 0}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2 flex gap-4">
-                      {summary.timeline.map((bucket) => (
-                        <div key={bucket.label} className="flex-1 text-center">
-                          <div className="text-xs font-medium text-slate-600">{bucket.label}</div>
-                          <div className="font-mono text-[11px] text-slate-500 tabular-nums">
-                            {bucket.visits}v / {bucket.conversions}c
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Conversion Funnel */}
-                  <div className="rounded-xl border border-slate-200 bg-white p-6 lg:col-span-5">
-                    <h2 className="font-display text-base font-bold text-slate-950">
-                      Conversion Funnel
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Visitor drop-off from arrival to $17 checkout completion
-                    </p>
-
-                    <div className="mt-6 space-y-5">
-                      <div>
-                        <div className="flex justify-between text-xs font-medium">
-                          <span className="text-slate-700">1. Page Visits</span>
-                          <span className="font-mono font-bold text-slate-950 tabular-nums">
-                            {summary.totalVisits} (100%)
-                          </span>
-                        </div>
-                        <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                          <div className="h-full rounded-full bg-emerald-500" style={{ width: '100%' }} />
-                        </div>
+                      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-full rounded-full bg-emerald-500" style={{ width: '100%' }} />
                       </div>
+                    </div>
 
-                      <div>
-                        <div className="flex justify-between text-xs font-medium">
-                          <span className="text-slate-700">2. Crucial CTA Clicks (Checkout Opened)</span>
-                          <span className="font-mono font-bold text-slate-950 tabular-nums">
-                            {summary.checkoutOpens} ({summary.ctaClickRate}%)
-                          </span>
-                        </div>
-                        <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full bg-emerald-600"
-                            style={{ width: `${Math.min(100, summary.ctaClickRate)}%` }}
-                          />
-                        </div>
+                    <div>
+                      <div className="flex justify-between text-xs font-medium">
+                        <span className="text-slate-700">2. Checkout opened (button clicks)</span>
+                        <span className="font-mono font-bold text-slate-950 tabular-nums">
+                          {summary.checkoutOpens} ({summary.ctaClickRate}%)
+                        </span>
                       </div>
-
-                      <div>
-                        <div className="flex justify-between text-xs font-medium">
-                          <span className="text-slate-700">3. Completed Purchases ($17)</span>
-                          <span className="font-mono font-bold text-emerald-700 tabular-nums">
-                            {summary.completedConversions} ({summary.overallConversionRate}%)
-                          </span>
-                        </div>
-                        <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full bg-emerald-800"
-                            style={{ width: `${Math.min(100, summary.overallConversionRate)}%` }}
-                          />
-                        </div>
+                      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-emerald-600"
+                          style={{ width: `${Math.min(100, summary.ctaClickRate)}%` }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -526,11 +466,9 @@ export default function AdminDashboardClient({
                       <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
                         <tr>
                           <th className="px-6 py-3">Country</th>
-                          <th className="px-6 py-3 text-right">Visits</th>
+                          <th className="px-6 py-3 text-right">Visitors</th>
                           <th className="px-6 py-3 text-right">Traffic Share</th>
                           <th className="px-6 py-3 text-right">Button Clicks</th>
-                          <th className="px-6 py-3 text-right">Purchases</th>
-                          <th className="px-6 py-3 text-right">Conv. Rate</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -550,12 +488,6 @@ export default function AdminDashboardClient({
                             </td>
                             <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-700">
                               {row.ctaClicks}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-900">
-                              {row.conversions}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono font-semibold tabular-nums text-emerald-700">
-                              {row.conversionRate}%
                             </td>
                           </tr>
                         ))}
@@ -592,7 +524,7 @@ export default function AdminDashboardClient({
                           <tr key={btn.buttonId} className="hover:bg-slate-50">
                             <td className="px-6 py-3 font-medium text-slate-900">{btn.label}</td>
                             <td className="px-6 py-3 text-xs text-slate-600">
-                              {btn.opensCheckout ? 'Opens Checkout ($17)' : 'Engagement / Preview'}
+                              {btn.opensCheckout ? 'Opens Checkout' : 'Engagement / Preview'}
                             </td>
                             <td className="px-6 py-3 text-right font-mono font-semibold tabular-nums text-slate-950">
                               {btn.clicks}
@@ -640,7 +572,6 @@ export default function AdminDashboardClient({
                             ['all', 'All'],
                             ['page_visit', 'Visits'],
                             ['cta_click', 'Clicks'],
-                            ['checkout_submit', 'Purchases'],
                           ] as Array<[EventTypeFilter, string]>
                         ).map(([id, label]) => (
                           <button
@@ -716,82 +647,82 @@ export default function AdminDashboardClient({
                   </div>
                 </section>
               )}
-
-              {/* Supabase Integration & SQL Setup Panel */}
-              {activeView === 'supabase' && (
-                <section className="space-y-6">
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <h2 className="font-display text-base font-bold text-slate-950">
-                          Supabase Project Endpoints & Live Sync
-                        </h2>
-                        <p className="mt-1 text-xs text-slate-600">{supabaseSync.message}</p>
-                      </div>
-                      <span
-                        className={`rounded-full px-3 py-1 font-mono text-xs font-semibold ${
-                          supabaseSync.mode === 'supabase-rest'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : supabaseSync.mode === 'supabase-public-storage'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {supabaseSync.mode}
-                      </span>
-                    </div>
-
-                    <dl className="mt-5 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <dt className="font-semibold text-slate-600">Project API URL</dt>
-                        <dd className="mt-1 break-all font-mono text-slate-900">
-                          {supabaseSync.projectUrl}
-                        </dd>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <dt className="font-semibold text-slate-600">REST API (PostgREST)</dt>
-                        <dd className="mt-1 break-all font-mono text-slate-900">
-                          {supabaseSync.restUrl}/
-                        </dd>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <dt className="font-semibold text-slate-600">Public Storage API</dt>
-                        <dd className="mt-1 break-all font-mono text-slate-900">
-                          {supabaseSync.storageUrl}/
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <h3 className="font-display text-base font-bold text-slate-950">
-                          SQL to Create Unprotected Public Analytics & IDs Tables
-                        </h3>
-                        <p className="mt-1 text-xs text-slate-600">
-                          Run this script in your Supabase SQL Editor, then add your Supabase anon
-                          key as <code className="font-mono text-blue-700">SUPABASE_ANON_KEY</code>{' '}
-                          in project Secrets if Kong requires an <code className="font-mono">apikey</code> header.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopySql()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer"
-                      >
-                        {copiedSql ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                        <span>{copiedSql ? 'Copied SQL' : 'Copy SQL'}</span>
-                      </button>
-                    </div>
-
-                    <pre className="mt-4 max-h-96 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-emerald-200">
-                      <code>{supabaseSql}</code>
-                    </pre>
-                  </div>
-                </section>
-              )}
             </>
+          )}
+
+          {/* Supabase Integration & SQL Setup Panel */}
+          {activeView === 'supabase' && (
+            <section className="space-y-6">
+              <div className="rounded-xl border border-slate-200 bg-white p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="font-display text-base font-bold text-slate-950">
+                      Supabase Project Endpoints & Live Sync
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-600">{supabaseSync.message}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 font-mono text-xs font-semibold ${
+                      supabaseSync.mode === 'supabase-rest'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : supabaseSync.mode === 'supabase-public-storage'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {supabaseSync.mode}
+                  </span>
+                </div>
+
+                <dl className="mt-5 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <dt className="font-semibold text-slate-600">Project API URL</dt>
+                    <dd className="mt-1 break-all font-mono text-slate-900">
+                      {supabaseSync.projectUrl}
+                    </dd>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <dt className="font-semibold text-slate-600">REST API (PostgREST)</dt>
+                    <dd className="mt-1 break-all font-mono text-slate-900">
+                      {supabaseSync.restUrl}/
+                    </dd>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <dt className="font-semibold text-slate-600">Public Storage API</dt>
+                    <dd className="mt-1 break-all font-mono text-slate-900">
+                      {supabaseSync.storageUrl}/
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-display text-base font-bold text-slate-950">
+                      SQL to Create Unprotected Public Analytics & IDs Tables
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Run this script in your Supabase SQL Editor, then add your Supabase anon
+                      key as <code className="font-mono text-blue-700">SUPABASE_ANON_KEY</code>{' '}
+                      in your hosting environment variables.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopySql()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer"
+                  >
+                    {copiedSql ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedSql ? 'Copied SQL' : 'Copy SQL'}</span>
+                  </button>
+                </div>
+
+                <pre className="mt-4 max-h-96 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-emerald-200">
+                  <code>{supabaseSql}</code>
+                </pre>
+              </div>
+            </section>
           )}
         </main>
       </div>
