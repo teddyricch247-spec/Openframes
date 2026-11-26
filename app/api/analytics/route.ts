@@ -16,14 +16,15 @@ import {
   resetAnalyticsStore,
 } from '@/lib/analytics-store';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerAdminSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const timeZone = req.nextUrl.searchParams.get('tz') ?? undefined;
   const events = await getAllAnalyticsEvents();
-  const summary = computeAnalyticsSummary(events);
+  const summary = computeAnalyticsSummary(events, { timeZone });
   return NextResponse.json(
     {
       ...summary,
@@ -44,15 +45,10 @@ export async function POST(req: NextRequest) {
       referrer?: string;
       buttonId?: CrucialButtonId;
       metadata?: string;
-      revenueUsd?: number;
     };
 
     const eventType = body.type;
-    if (
-      eventType !== 'page_visit' &&
-      eventType !== 'cta_click' &&
-      eventType !== 'checkout_submit'
-    ) {
+    if (eventType !== 'page_visit' && eventType !== 'cta_click') {
       return NextResponse.json({ error: 'Invalid analytics event type' }, { status: 400 });
     }
 
@@ -82,14 +78,8 @@ export async function POST(req: NextRequest) {
       device,
       referrer: (body.referrer || 'direct').slice(0, 120),
       buttonId: body.buttonId,
-      buttonLabel: body.buttonId
-        ? BUTTON_LABELS[body.buttonId] ?? body.buttonId
-        : eventType === 'checkout_submit'
-        ? 'Black Friday $17 Guide Purchase'
-        : undefined,
+      buttonLabel: body.buttonId ? BUTTON_LABELS[body.buttonId] ?? body.buttonId : undefined,
       metadata: body.metadata?.slice(0, 120),
-      revenueUsd:
-        eventType === 'checkout_submit' ? Number(body.revenueUsd ?? 17) : undefined,
     };
 
     await appendAnalyticsEvent(event);
@@ -109,9 +99,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const mode = req.nextUrl.searchParams.get('mode') === 'empty' ? 'empty' : 'reseed';
-  const events = await resetAnalyticsStore(mode);
-  const summary = computeAnalyticsSummary(events);
+  const timeZone = req.nextUrl.searchParams.get('tz') ?? undefined;
+  const events = await resetAnalyticsStore();
+  const summary = computeAnalyticsSummary(events, { timeZone });
   return NextResponse.json(
     {
       ...summary,
