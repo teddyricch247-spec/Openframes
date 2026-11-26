@@ -1,4 +1,4 @@
-export type AnalyticsEventType = 'page_visit' | 'cta_click' | 'checkout_submit';
+export type AnalyticsEventType = 'page_visit' | 'cta_click';
 
 export type CrucialButtonId =
   | 'nav_get_guide'
@@ -23,7 +23,6 @@ export interface AnalyticsEvent {
   buttonId?: CrucialButtonId;
   buttonLabel?: string;
   metadata?: string;
-  revenueUsd?: number;
 }
 
 export interface CountryMetric {
@@ -31,8 +30,6 @@ export interface CountryMetric {
   countryName: string;
   visits: number;
   ctaClicks: number;
-  conversions: number;
-  conversionRate: number;
   sharePercent: number;
 }
 
@@ -44,10 +41,17 @@ export interface ButtonMetric {
   opensCheckout: boolean;
 }
 
-export interface TimelineBucket {
+export interface DailyBucket {
+  /** Calendar day, YYYY-MM-DD, in the summary's time zone */
+  date: string;
+  /** Short label, e.g. "Nov 26" */
   label: string;
-  visits: number;
-  conversions: number;
+  /** First-ever visits from a device on this day */
+  newVisitors: number;
+  /** Distinct visitors with any recorded activity (visit or click) on this day */
+  activeVisitors: number;
+  buttonClicks: number;
+  checkoutOpens: number;
 }
 
 export interface AnalyticsSummary {
@@ -55,17 +59,24 @@ export interface AnalyticsSummary {
   uniqueVisitors: number;
   crucialButtonClicks: number;
   checkoutOpens: number;
-  completedConversions: number;
-  estimatedRevenueUsd: number;
   ctaClickRate: number;
-  overallConversionRate: number;
-  checkoutCompletionRate: number;
   countriesCount: number;
   countryBreakdown: CountryMetric[];
   buttonBreakdown: ButtonMetric[];
-  timeline: TimelineBucket[];
+  /** Oldest day first, today last. Days with no activity are included as zeros. */
+  daily: DailyBucket[];
+  /** IANA time zone used to split events into days */
+  timeZone: string;
   recentEvents: AnalyticsEvent[];
 }
+
+export interface SummaryOptions {
+  timeZone?: string;
+  nowMs?: number;
+  days?: number;
+}
+
+export const DEFAULT_DAILY_WINDOW_DAYS = 90;
 
 const COUNTRY_NAME_MAP: Record<string, string> = {
   US: 'United States',
@@ -208,23 +219,117 @@ export function deduplicatePageVisits(events: AnalyticsEvent[]): AnalyticsEvent[
   return result;
 }
 
-export function computeAnalyticsSummary(rawEvents: AnalyticsEvent[]): AnalyticsSummary {
+function resolveTimeZone(timeZone?: string | null): string {
+  if (!timeZone) return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return timeZone;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function createDayKeyFormatter(timeZone: string): (ms: number) => string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return (ms: number) => {
+    const parts = formatter.formatToParts(new Date(ms));
+    const year = parts.find((p) => p.type === 'year')?.value ?? '1970';
+    const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+    const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+    return `${year}-${month}-${day}`;
+  };
+}
+
+function shiftDayKey(dayKey: string, deltaDays: number): string {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + deltaDays)).toISOString().slice(0, 10);
+}
+
+function labelForDayKey(dayKey: string): string {
+  return new Date(`${dayKey}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+export function buildDailyBuckets(
+  events: AnalyticsEvent[],
+  options: SummaryOptions = {}
+): { daily: DailyBucket[]; timeZone: string } {
+  const timeZone = resolveTimeZone(options.timeZone);
+  const nowMs = options.nowMs ?? Date.now();
+  const days = Math.max(1, Math.min(options.days ?? DEFAULT_DAILY_WINDOW_DAYS, 366));
+  const dayKeyOf = createDayKeyFormatter(timeZone);
+
+  const todayKey = dayKeyOf(nowMs);
+  const keys: string[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    keys.push(shiftDayKey(todayKey, -i));
+  }
+
+  const buckets = new Map<
+    string,
+    { newVisitors: number; active: Set<string>; buttonClicks: number; checkoutOpens: number }
+  >();
+  for (const key of keys) {
+    buckets.set(key, { newVisitors: 0, active: new Set<string>(), buttonClicks: 0, checkoutOpens: 0 });
+  }
+
+  for (const event of events) {
+    const ms = Date.parse(event.timestamp);
+    if (Number.isNaN(ms)) continue;
+    const bucket = buckets.get(dayKeyOf(ms));
+    if (!bucket) continue;
+
+    bucket.active.add(event.visitorId);
+    if (event.type === 'page_visit') {
+      bucket.newVisitors += 1;
+    } else if (event.type === 'cta_click') {
+      bucket.buttonClicks += 1;
+      if (event.buttonId && CHECKOUT_BUTTON_IDS.has(event.buttonId)) {
+        bucket.checkoutOpens += 1;
+      }
+    }
+  }
+
+  const daily: DailyBucket[] = keys.map((key) => {
+    const bucket = buckets.get(key)!;
+    return {
+      date: key,
+      label: labelForDayKey(key),
+      newVisitors: bucket.newVisitors,
+      activeVisitors: bucket.active.size,
+      buttonClicks: bucket.buttonClicks,
+      checkoutOpens: bucket.checkoutOpens,
+    };
+  });
+
+  return { daily, timeZone };
+}
+
+export function computeAnalyticsSummary(
+  rawEvents: AnalyticsEvent[],
+  options: SummaryOptions = {}
+): AnalyticsSummary {
   const events = deduplicatePageVisits(rawEvents);
   const visits = events.filter((e) => e.type === 'page_visit');
   const clicks = events.filter((e) => e.type === 'cta_click');
-  const conversions = events.filter((e) => e.type === 'checkout_submit');
 
   const uniqueVisitorIds = new Set(visits.map((v) => v.visitorId));
   const checkoutOpens = clicks.filter(
     (c) => c.buttonId && CHECKOUT_BUTTON_IDS.has(c.buttonId)
   ).length;
 
-  const estimatedRevenueUsd = conversions.reduce((sum, c) => sum + (c.revenueUsd ?? 17), 0);
-
   // Country aggregation
   const countryMap = new Map<
     string,
-    { countryCode: string; countryName: string; visits: number; ctaClicks: number; conversions: number }
+    { countryCode: string; countryName: string; visits: number; ctaClicks: number }
   >();
 
   for (const event of events) {
@@ -234,12 +339,10 @@ export function computeAnalyticsSummary(rawEvents: AnalyticsEvent[]): AnalyticsS
       countryName: event.countryName || COUNTRY_NAME_MAP[code] || code,
       visits: 0,
       ctaClicks: 0,
-      conversions: 0,
     };
 
     if (event.type === 'page_visit') existing.visits += 1;
     if (event.type === 'cta_click') existing.ctaClicks += 1;
-    if (event.type === 'checkout_submit') existing.conversions += 1;
     countryMap.set(code, existing);
   }
 
@@ -248,10 +351,9 @@ export function computeAnalyticsSummary(rawEvents: AnalyticsEvent[]): AnalyticsS
   const countryBreakdown: CountryMetric[] = Array.from(countryMap.values())
     .map((c) => ({
       ...c,
-      conversionRate: roundRate(c.conversions, c.visits),
       sharePercent: roundRate(c.visits, totalVisits),
     }))
-    .sort((a, b) => b.visits - a.visits || b.conversions - a.conversions);
+    .sort((a, b) => b.visits - a.visits || b.ctaClicks - a.ctaClicks);
 
   // Button aggregation
   const buttonCounts = new Map<CrucialButtonId, number>();
@@ -274,29 +376,7 @@ export function computeAnalyticsSummary(rawEvents: AnalyticsEvent[]): AnalyticsS
     })
     .sort((a, b) => b.clicks - a.clicks);
 
-  // Daily timeline aggregation (sorted chronologically)
-  const dayBuckets = new Map<string, { visits: number; conversions: number; sortKey: string }>();
-  for (const event of events) {
-    const d = new Date(event.timestamp);
-    if (Number.isNaN(d.getTime())) continue;
-    const sortKey = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-    const entry = dayBuckets.get(sortKey) ?? { visits: 0, conversions: 0, sortKey };
-    if (event.type === 'page_visit') entry.visits += 1;
-    if (event.type === 'checkout_submit') entry.conversions += 1;
-    dayBuckets.set(sortKey, { ...entry, visits: entry.visits, conversions: entry.conversions });
-  }
-
-  const timeline: TimelineBucket[] = Array.from(dayBuckets.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([sortKey, val]) => {
-      const d = new Date(`${sortKey}T12:00:00Z`);
-      return {
-        label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
-        visits: val.visits,
-        conversions: val.conversions,
-      };
-    });
+  const { daily, timeZone } = buildDailyBuckets(events, options);
 
   const recentEvents = [...events]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -307,15 +387,12 @@ export function computeAnalyticsSummary(rawEvents: AnalyticsEvent[]): AnalyticsS
     uniqueVisitors: uniqueVisitorIds.size,
     crucialButtonClicks: totalClicks,
     checkoutOpens,
-    completedConversions: conversions.length,
-    estimatedRevenueUsd,
     ctaClickRate: roundRate(checkoutOpens, totalVisits),
-    overallConversionRate: roundRate(conversions.length, totalVisits),
-    checkoutCompletionRate: roundRate(conversions.length, checkoutOpens),
     countriesCount: countryBreakdown.filter((c) => c.visits > 0).length,
     countryBreakdown,
     buttonBreakdown,
-    timeline,
+    daily,
+    timeZone,
     recentEvents,
   };
 }
