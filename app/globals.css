@@ -1,0 +1,265 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #ffffff;
+  color: #0f172a;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes wind-branch-a {
+  0% {
+    transform: rotate(-3.5deg) translate3d(0px, 0px, 0px);
+  }
+  28% {
+    transform: rotate(5.2deg) translate3d(4px, 3px, 0px);
+  }
+  56% {
+    transform: rotate(-1.2deg) translate3d(-2px, -2px, 0px);
+  }
+  80% {
+    transform: rotate(4.2deg) translate3d(3px, 2px, 0px);
+  }
+  100% {
+    transform: rotate(-3.5deg) translate3d(0px, 0px, 0px);
+  }
+}
+
+@keyframes wind-branch-b {
+  0% {
+    transform: rotate(4deg) translate3d(0px, 0px, 0px);
+  }
+  32% {
+    transform: rotate(-5.5deg) translate3d(-4px, 3px, 0px);
+  }
+  62% {
+    transform: rotate(1.5deg) translate3d(2px, -2px, 0px);
+  }
+  84% {
+    transform: rotate(-3.8deg) translate3d(-2px, 1px, 0px);
+  }
+  100% {
+    transform: rotate(4deg) translate3d(0px, 0px, 0px);
+  }
+}
+
+@keyframes leaf-flutter-a {
+  0% {
+    transform: rotate(-8deg) scaleX(0.95) skewY(-2deg);
+  }
+  30% {
+    transform: rotate(12deg) scaleX(1.04) skewY(3deg);
+  }
+  60% {
+    transform: rotate(-3deg) scaleX(0.92) skewY(-1deg);
+  }
+  82% {
+    transform: rotate(9deg) scaleX(1.02) skewY(2deg);
+  }
+  100% {
+    transform: rotate(-8deg) scaleX(0.95) skewY(-2deg);
+  }
+}
+
+@keyframes leaf-flutter-b {
+  0% {
+    transform: rotate(9deg) scaleY(0.94) skewX(2deg);
+  }
+  36% {
+    transform: rotate(-11deg) scaleY(1.05) skewX(-3deg);
+  }
+  68% {
+    transform: rotate(4deg) scaleY(0.96) skewX(1deg);
+  }
+  100% {
+    transform: rotate(9deg) scaleY(0.94) skewX(2deg);
+  }
+}
+
+@keyframes flower-nod {
+  0%, 100% {
+    transform: rotate(-7deg) translate3d(-2px, 0px, 0px);
+  }
+  35% {
+    transform: rotate(9deg) translate3d(3px, 2px, 0px);
+  }
+  70% {
+    transform: rotate(-3deg) translate3d(0px, -2px, 0px);
+  }
+}
+
+@keyframes corolla-bloom {
+  0%, 100% {
+    transform: scale(0.92) rotate(-10deg);
+  }
+  45% {
+    transform: scale(1.1) rotate(14deg);
+  }
+  75% {
+    transform: scale(0.98) rotate(3deg);
+  }
+}
+
+@keyframes tendril-curl {
+  0%, 100% {
+    transform: rotate(-10deg) scale(0.94);
+  }
+  50% {
+    transform: rotate(14deg) scale(1.06);
+  }
+}
+
+@keyframes petal-wind-1 {
+  0% {
+    transform: translate3d(-14px, 8px, 0px) rotate(-18deg) scale(0.9);
+    opacity: 0.3;
+  }
+  35% {
+    transform: translate3d(36px, -22px, 0px) rotate(52deg) scale(1.1);
+    opacity: 0.85;
+  }
+  70% {
+    transform: translate3d(72px, 10px, 0px) rotate(120deg) scale(0.95);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate3d(-14px, 8px, 0px) rotate(-18deg) scale(0.9);
+    opacity: 0.3;
+  }
+}
+
+@keyframes petal-wind-2 {
+  0% {
+    transform: translate3d(16px, -10px, 0px) rotate(24deg) scale(1);
+    opacity: 0.35;
+  }
+  45% {
+    transform: translate3d(-44px, 24px, 0px) rotate(-65deg) scale(1.12);
+    opacity: 0.82;
+  }
+  78% {
+    transform: translate3d(-12px, 38px, 0px) rotate(-110deg) scale(0.9);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate3d(16px, -10px, 0px) rotate(24deg) scale(1);
+    opacity: 0.35;
+  }
+}
+
+@keyframes petal-wind-3 {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0px) rotate(0deg);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translate3d(28px, -28px, 0px) rotate(88deg);
+    opacity: 0.78;
+  }
+}
+
+@keyframes thumb-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes thumb-bar {
+  0%, 100% {
+    transform: scaleY(0.7);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes thumb-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-wind-branch-a {
+  animation: wind-branch-a 6.2s ease-in-out infinite;
+}
+
+.animate-wind-branch-b {
+  animation: wind-branch-b 7.1s ease-in-out infinite;
+}
+
+.animate-leaf-flutter-a {
+  animation: leaf-flutter-a 3.4s ease-in-out infinite;
+}
+
+.animate-leaf-flutter-b {
+  animation: leaf-flutter-b 4.1s ease-in-out infinite;
+}
+
+.animate-flower-nod {
+  animation: flower-nod 4.6s ease-in-out infinite;
+}
+
+.animate-corolla-bloom {
+  animation: corolla-bloom 5.4s ease-in-out infinite;
+}
+
+.animate-tendril-curl {
+  animation: tendril-curl 4.2s ease-in-out infinite;
+}
+
+.animate-petal-wind-1 {
+  animation: petal-wind-1 9.5s ease-in-out infinite;
+}
+
+.animate-petal-wind-2 {
+  animation: petal-wind-2 11s ease-in-out infinite;
+}
+
+.animate-petal-wind-3 {
+  animation: petal-wind-3 8.2s ease-in-out infinite;
+}
+
+.animate-thumb-float {
+  animation: thumb-float 4s ease-in-out infinite;
+}
+
+.animate-thumb-bar {
+  animation: thumb-bar 2.6s ease-in-out infinite;
+}
+
+.animate-thumb-orbit {
+  animation: thumb-orbit 18s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

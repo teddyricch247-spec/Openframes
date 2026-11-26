@@ -1,0 +1,6 @@
+{
+  "name": "OpenFrame — 20-Minute Open-Source Animation Guide",
+  "description": "Learn how to create studio-quality code-drawn animations from prompt to final edit in 20 minutes using free open-source tools — no Claude Code subscription required. Black Friday sale: $17 (regularly $47).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
