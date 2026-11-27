@@ -17,7 +17,7 @@ Everything above is a known, deliberate trade-off. If something breaks, it is no
 ## What this project is
 
 - A Next.js (TypeScript, App Router) site with a public landing/pricing/guide side and a password-protected **Admin dashboard** that shows visitor analytics.
-- Admin tabs: Daily Data, Overview, Visitor Countries. Buttons: Live Site, Refresh, Clear Events, Log Out.
+- Admin tabs: Overview, Day by Day, Visit Log. Buttons: Live Site, Refresh, Log Out. (The Supabase SQL & Sync tab and the Clear Events button were removed on 2026-11-27.)
 - Hosted on Vercel, project name `openframes`, auto-deploys from the `main` branch of `teddyricch247-spec/Openframes`.
 - Backend storage is a Supabase project (shared with other apps, hence the `openfram_` prefix on every table, bucket and file name).
 
@@ -50,6 +50,9 @@ Env var changes only apply to **new** deployments, so redeploy after changing th
 ## How analytics works
 
 - Events are `page_visit` and `cta_click`. The dashboard only reads those two types.
+- Who is NOT counted: bots/crawlers/link previews (`lib/bot-detection.ts`, checked in the browser and again in `app/api/analytics/route.ts`), any browser that ever logged in as admin (`openframe_ignore` flag in localStorage + cookie, set at login), and any request made while an admin session is active.
+- A visit is only sent after a real person interacts with the page (touch, scroll, mouse, key) and has stayed ~1.5s (`trackVisitWhenHuman` in `lib/track-client.ts`).
+- One person = one visit: the browser keeps a visitor id plus a "visit recorded" flag, and the server also stores a salted hash of IP + user agent + coarse browser traits (in the `metadata` column as `fp:...`, page visits only) and ignores a second visit with the same hash.
 - Table: `openfram_visitor_analytics`. A unique index allows only one `page_visit` per `visitor_id`, so a person is never counted twice.
 - Writes go to Supabase REST first. On success, a JSON snapshot is also uploaded to the public Storage bucket `openfram_analytics` (`openfram_events.json`).
 - If Supabase is unreachable or returns 401, events only live in server memory, which Vercel wipes between invocations. They are lost.

@@ -23,6 +23,8 @@ export interface AnalyticsEvent {
   buttonId?: CrucialButtonId;
   buttonLabel?: string;
   metadata?: string;
+  /** Salted hash of IP + browser traits. Only set on page_visit, used to spot the same person on a new browser session. */
+  fingerprint?: string;
 }
 
 export interface CountryMetric {

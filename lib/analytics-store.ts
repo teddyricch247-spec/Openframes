@@ -39,6 +39,8 @@ interface SupabaseEventRow {
 
 const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(['page_visit', 'cta_click']);
 
+const FINGERPRINT_PREFIX = 'fp:';
+
 // PostgREST returns at most 1000 rows per request by default, so read in pages.
 const PAGE_SIZE = 1000;
 const MAX_EVENTS = 20000;
@@ -86,11 +88,13 @@ function toRow(event: AnalyticsEvent): SupabaseEventRow {
     referrer: event.referrer,
     button_id: event.buttonId ?? null,
     button_label: event.buttonLabel ?? null,
-    metadata: event.metadata ?? null,
+    // The fingerprint lives in `metadata` for page visits so no schema change is needed.
+    metadata: event.fingerprint ? `${FINGERPRINT_PREFIX}${event.fingerprint}` : event.metadata ?? null,
   };
 }
 
 function fromRow(row: SupabaseEventRow): AnalyticsEvent {
+  const isFingerprint = typeof row.metadata === 'string' && row.metadata.startsWith(FINGERPRINT_PREFIX);
   return {
     id: row.id,
     type: row.type,
@@ -103,7 +107,8 @@ function fromRow(row: SupabaseEventRow): AnalyticsEvent {
     referrer: row.referrer || 'direct',
     buttonId: row.button_id ?? undefined,
     buttonLabel: row.button_label ?? undefined,
-    metadata: row.metadata ?? undefined,
+    metadata: isFingerprint ? undefined : row.metadata ?? undefined,
+    fingerprint: isFingerprint ? row.metadata!.slice(FINGERPRINT_PREFIX.length) : undefined,
   };
 }
 
@@ -288,6 +293,34 @@ export async function appendAnalyticsEvent(event: AnalyticsEvent): Promise<Analy
   }
 
   return event;
+}
+
+/** True when a page visit from the same IP + browser traits was already recorded. */
+export async function hasPageVisitWithFingerprint(fingerprint: string): Promise<boolean> {
+  const store = getLocalStore();
+  if (store.events.some((e) => e.type === 'page_visit' && e.fingerprint === fingerprint)) {
+    return true;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      select: 'id',
+      type: 'eq.page_visit',
+      metadata: `eq.${FINGERPRINT_PREFIX}${fingerprint}`,
+      limit: '1',
+    });
+    const res = await fetch(`${SUPABASE_REST_URL}/${SUPABASE_ANALYTICS_TABLE}?${params.toString()}`, {
+      method: 'GET',
+      headers: getSupabaseHeaders(),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return false;
+    const rows = (await res.json()) as Array<{ id: string }>;
+    return Array.isArray(rows) && rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function resetAnalyticsStore(): Promise<AnalyticsEvent[]> {

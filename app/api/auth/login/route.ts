@@ -6,6 +6,7 @@ import {
   verifyAdminCredentials,
 } from '@/lib/admin-auth';
 import { verifySupabaseAdminIdTable } from '@/lib/analytics-store';
+import { IGNORE_DEVICE_COOKIE } from '@/lib/bot-detection';
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,6 +40,13 @@ export async function POST(req: NextRequest) {
     const token = createAdminSessionToken(username);
     const response = NextResponse.json({ ok: true, username }, { status: 200 });
     response.cookies.set(ADMIN_SESSION_COOKIE, token, getAdminCookieOptions());
+    // Mark this browser as an admin device for a year so its visits are never counted again.
+    response.cookies.set(IGNORE_DEVICE_COOKIE, '1', {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: 'lax',
+      secure: true,
+    });
     return response;
   } catch {
     return NextResponse.json({ error: 'Malformed login request.' }, { status: 400 });

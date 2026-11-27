@@ -13,7 +13,7 @@ import {
   getCountdownToBlackFriday,
 } from '@/lib/pricing';
 import type { CrucialButtonId } from '@/lib/analytics';
-import { trackAnalyticsEvent } from '@/lib/track-client';
+import { trackAnalyticsEvent, trackVisitWhenHuman } from '@/lib/track-client';
 
 interface LandingClientProps {
   initialTimestampMs: number;
@@ -39,11 +39,11 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
     };
   }, []);
 
-  // Track initial landing page visit once per mount
+  // Count the visit once, and only after a real person interacts with the page
   useEffect(() => {
     if (visitLoggedRef.current) return;
     visitLoggedRef.current = true;
-    void trackAnalyticsEvent({ type: 'page_visit' });
+    trackVisitWhenHuman();
   }, []);
 
   const pricing = calculateBlackFridayPricing(nowMs);

@@ -8,15 +8,12 @@ import {
   ArrowLeft,
   BarChart3,
   CalendarDays,
-  Check,
-  Copy,
-  Database,
   Globe,
+  ListOrdered,
   LogOut,
   MousePointerClick,
   RefreshCw,
   Search,
-  Trash2,
   TrendingUp,
   Users,
 } from 'lucide-react';
@@ -24,14 +21,13 @@ import type { AnalyticsSummary } from '@/lib/analytics';
 import type { SupabaseSyncInfo } from '@/lib/analytics-store';
 import DailyActivity from './DailyActivity';
 
-type AdminView = 'daily' | 'overview' | 'countries' | 'buttons' | 'events' | 'supabase';
+type AdminView = 'overview' | 'daily' | 'log';
 type EventTypeFilter = 'all' | 'page_visit' | 'cta_click';
 
 interface AdminDashboardClientProps {
   initialSummary: AnalyticsSummary;
   sessionUsername: string;
   initialSupabaseSync: SupabaseSyncInfo;
-  supabaseSql: string;
 }
 
 function formatEventTimestamp(iso: string): string {
@@ -42,18 +38,7 @@ function formatEventTimestamp(iso: string): string {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
   });
-}
-
-function eventTypeLabel(type: 'page_visit' | 'cta_click'): {
-  label: string;
-  tone: string;
-} {
-  if (type === 'cta_click') {
-    return { label: 'Button Click', tone: 'text-amber-700 font-medium' };
-  }
-  return { label: 'Page Visit', tone: 'text-slate-700 font-medium' };
 }
 
 function analyticsUrl(): string {
@@ -61,21 +46,43 @@ function analyticsUrl(): string {
   return `/api/analytics?tz=${encodeURIComponent(tz)}`;
 }
 
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+interface StatCardProps {
+  title: string;
+  value: number | string;
+  note: string;
+  icon: typeof Users;
+}
+
+function StatCard({ title, value, note, icon: Icon }: StatCardProps) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <div className="flex items-center justify-between text-xs font-medium text-slate-500">
+        <span>{title}</span>
+        <Icon className="h-4 w-4 text-emerald-700" />
+      </div>
+      <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">{value}</div>
+      <div className="mt-1 text-xs leading-snug text-slate-600">{note}</div>
+    </div>
+  );
+}
+
 export default function AdminDashboardClient({
   initialSummary,
   sessionUsername,
   initialSupabaseSync,
-  supabaseSql,
 }: AdminDashboardClientProps) {
   const router = useRouter();
   const [summary, setSummary] = useState<AnalyticsSummary>(initialSummary);
   const [supabaseSync, setSupabaseSync] = useState<SupabaseSyncInfo>(initialSupabaseSync);
-  const [activeView, setActiveView] = useState<AdminView>('daily');
+  const [activeView, setActiveView] = useState<AdminView>('overview');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [eventFilter, setEventFilter] = useState<EventTypeFilter>('all');
-  const [copiedSql, setCopiedSql] = useState(false);
 
   const fetchLatest = useCallback(async () => {
     setIsLoading(true);
@@ -123,32 +130,6 @@ export default function AdminDashboardClient({
     };
   }, [router]);
 
-  const handleClear = async () => {
-    const confirmed = window.confirm(
-      'Delete every recorded visit and click? This permanently clears the analytics table and cannot be undone.'
-    );
-    if (!confirmed) return;
-
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch(analyticsUrl(), { method: 'DELETE' });
-      if (res.status === 401) {
-        router.push('/login');
-        router.refresh();
-        return;
-      }
-      if (!res.ok) throw new Error('Failed to clear events');
-      const data = (await res.json()) as AnalyticsSummary & { supabaseSync?: SupabaseSyncInfo };
-      setSummary(data);
-      if (data.supabaseSync) setSupabaseSync(data.supabaseSync);
-    } catch {
-      setErrorMessage('Unable to clear analytics events.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
     setIsLoading(true);
     try {
@@ -159,26 +140,14 @@ export default function AdminDashboardClient({
     }
   };
 
-  const handleCopySql = async () => {
-    try {
-      await navigator.clipboard.writeText(supabaseSql);
-      setCopiedSql(true);
-      window.setTimeout(() => setCopiedSql(false), 2000);
-    } catch {
-      setCopiedSql(false);
-    }
-  };
-
   const filteredEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return summary.recentEvents.filter((evt) => {
       if (eventFilter !== 'all' && evt.type !== eventFilter) return false;
       if (!q) return true;
       return (
-        evt.visitorId.toLowerCase().includes(q) ||
         evt.countryName.toLowerCase().includes(q) ||
         evt.countryCode.toLowerCase().includes(q) ||
-        evt.timezone.toLowerCase().includes(q) ||
         evt.referrer.toLowerCase().includes(q) ||
         evt.device.toLowerCase().includes(q) ||
         (evt.buttonLabel ?? '').toLowerCase().includes(q) ||
@@ -192,20 +161,21 @@ export default function AdminDashboardClient({
   const last7Visitors = last7.reduce((total, d) => total + d.newVisitors, 0);
   const last7Clicks = last7.reduce((total, d) => total + d.buttonClicks, 0);
 
+  const countriesWithVisits = summary.countryBreakdown.filter((c) => c.visits > 0);
+  const maxCountryVisits = Math.max(1, ...countriesWithVisits.map((c) => c.visits));
+  const buyButtons = summary.buttonBreakdown.filter((b) => b.opensCheckout);
+  const otherButtons = summary.buttonBreakdown.filter((b) => !b.opensCheckout);
+
   const navItems: Array<{ id: AdminView; label: string; icon: typeof BarChart3 }> = [
-    { id: 'daily', label: 'Daily Data', icon: CalendarDays },
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'countries', label: 'Visitor Countries', icon: Globe },
-    { id: 'buttons', label: 'Crucial Buttons', icon: MousePointerClick },
-    { id: 'events', label: 'Visit & Click Log', icon: Users },
-    { id: 'supabase', label: 'Supabase SQL & Sync', icon: Database },
+    { id: 'daily', label: 'Day by Day', icon: CalendarDays },
+    { id: 'log', label: 'Visit Log', icon: ListOrdered },
   ];
 
-  const hasNoEvents = summary.totalVisits === 0 && summary.recentEvents.length === 0;
+  const hasNoEvents = summary.totalVisits === 0 && summary.crucialButtonClicks === 0;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 lg:flex">
-      {/* Left Sidebar (260px on desktop, per SaaS dashboard guidelines) */}
       <aside className="border-b border-slate-200 bg-white lg:w-64 lg:shrink-0 lg:border-b-0 lg:border-r">
         <div className="flex h-16 items-center justify-between border-b border-slate-200 px-6">
           <Link
@@ -240,12 +210,9 @@ export default function AdminDashboardClient({
         </nav>
 
         <div className="hidden border-t border-slate-200 p-4 lg:block">
-          <p className="text-xs leading-relaxed text-slate-500">
-            {supabaseSync.message}
-          </p>
           <Link
             href="/"
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             <span>Back to Landing Page</span>
@@ -253,9 +220,7 @@ export default function AdminDashboardClient({
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <div className="min-w-0 flex-1">
-        {/* Top Bar with Breadcrumb & Primary Controls */}
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3.5 sm:px-8">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">OpenFrame</span>
@@ -281,15 +246,6 @@ export default function AdminDashboardClient({
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleClear()}
-              disabled={isLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Clear Events</span>
             </button>
             <button
               type="button"
@@ -325,403 +281,241 @@ export default function AdminDashboardClient({
             </div>
           )}
 
-          {/* KPI Summary Row */}
-          <section aria-label="Key metrics" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Total Visitors</span>
-                <Users className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                {summary.totalVisits}
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                {summary.uniqueVisitors} unique devices · {summary.countriesCount} countries
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Today</span>
-                <CalendarDays className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                {today?.newVisitors ?? 0}
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                new visitors · {today?.activeVisitors ?? 0} active · {today?.buttonClicks ?? 0} clicks
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Last 7 Days</span>
-                <TrendingUp className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                {last7Visitors}
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                new visitors · {last7Clicks} button clicks
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>Checkout Opens</span>
-                <MousePointerClick className="h-4 w-4 text-emerald-700" />
-              </div>
-              <div className="mt-2 font-mono text-3xl font-bold text-slate-950 tabular-nums">
-                {summary.checkoutOpens}
-              </div>
-              <div className="mt-1 text-xs text-slate-600 tabular-nums">
-                {summary.crucialButtonClicks} total button clicks · {summary.ctaClickRate}% of visitors
-              </div>
-            </div>
-          </section>
-
-          {/* Daily activity: always available, even before the first event */}
-          {(activeView === 'daily' || activeView === 'overview') && (
-            <DailyActivity
-              daily={summary.daily}
-              timeZone={summary.timeZone}
-              showTable={activeView === 'daily'}
-            />
+          {/* The four numbers that matter, in plain words */}
+          {activeView !== 'log' && (
+            <section
+              aria-label="Key numbers"
+              className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4"
+            >
+              <StatCard
+                title="Visitors, all time"
+                value={summary.totalVisits}
+                note={
+                  summary.countriesCount > 0
+                    ? `From ${plural(summary.countriesCount, 'country', 'countries')}`
+                    : 'Each person counted once'
+                }
+                icon={Users}
+              />
+              <StatCard
+                title="Visitors today"
+                value={today?.newVisitors ?? 0}
+                note={`${plural(today?.buttonClicks ?? 0, 'button click')} today`}
+                icon={CalendarDays}
+              />
+              <StatCard
+                title="Visitors, last 7 days"
+                value={last7Visitors}
+                note={`${plural(last7Clicks, 'button click')} this week`}
+                icon={TrendingUp}
+              />
+              <StatCard
+                title="Buy-button clicks"
+                value={summary.checkoutOpens}
+                note={`${summary.ctaClickRate} clicks per 100 visitors`}
+                icon={MousePointerClick}
+              />
+            </section>
           )}
 
-          {hasNoEvents && activeView !== 'daily' && activeView !== 'supabase' ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
-              <h2 className="font-display text-lg font-bold text-slate-950">
-                No visitor events recorded yet
-              </h2>
+          {activeView === 'overview' && hasNoEvents && (
+            <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
+              <h2 className="font-display text-lg font-bold text-slate-950">No visitors yet</h2>
               <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-                Open the landing page in a new browser and click a button. Real visits and clicks
-                appear here after a refresh.
+                Everyone is counted once, and only real people. Bots, link previews and your own
+                admin browser are ignored. Visits show up here after a refresh.
               </p>
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-                <Link
-                  href="/"
-                  className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-                >
-                  Open Landing Page
-                </Link>
-              </div>
             </div>
-          ) : (
+          )}
+
+          {activeView === 'overview' && !hasNoEvents && (
             <>
-              {/* Conversion funnel (visitors to checkout opens) */}
-              {activeView === 'overview' && (
-                <section className="rounded-xl border border-slate-200 bg-white p-6">
-                  <h2 className="font-display text-base font-bold text-slate-950">
-                    Visitor to Checkout Funnel
+              <DailyActivity
+                daily={summary.daily}
+                timeZone={summary.timeZone}
+                showTable={false}
+                defaultRange={7}
+              />
+
+              <section className="rounded-xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+                  <h2 className="flex items-center gap-2 font-display text-base font-bold text-slate-950">
+                    <Globe className="h-4 w-4 text-emerald-700" />
+                    Where visitors are from
                   </h2>
-                  <p className="text-xs text-slate-500">
-                    How many visitors reached each step. Payments are not tracked.
+                </div>
+                {countriesWithVisits.length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-slate-500 sm:px-6">No visitors yet.</p>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {countriesWithVisits.map((row) => (
+                      <li key={row.countryCode} className="px-5 py-3 sm:px-6">
+                        <div className="flex items-baseline justify-between gap-3 text-sm">
+                          <span className="font-medium text-slate-900">
+                            {row.countryName}
+                            <span className="ml-2 font-mono text-xs text-slate-400">
+                              {row.countryCode}
+                            </span>
+                          </span>
+                          <span className="font-mono tabular-nums text-slate-950">
+                            <span className="font-semibold">{row.visits}</span>
+                            <span className="ml-2 text-xs text-slate-500">{row.sharePercent}%</span>
+                          </span>
+                        </div>
+                        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${(row.visits / maxCountryVisits) * 100}%` }}
+                          />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+                  <h2 className="flex items-center gap-2 font-display text-base font-bold text-slate-950">
+                    <MousePointerClick className="h-4 w-4 text-emerald-700" />
+                    What people clicked
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {plural(summary.crucialButtonClicks, 'click')} in total
                   </p>
+                </div>
 
-                  <div className="mt-6 space-y-5">
-                    <div>
-                      <div className="flex justify-between text-xs font-medium">
-                        <span className="text-slate-700">1. Visitors</span>
-                        <span className="font-mono font-bold text-slate-950 tabular-nums">
-                          {summary.totalVisits} (100%)
-                        </span>
-                      </div>
-                      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full rounded-full bg-emerald-500" style={{ width: '100%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs font-medium">
-                        <span className="text-slate-700">2. Checkout opened (button clicks)</span>
-                        <span className="font-mono font-bold text-slate-950 tabular-nums">
-                          {summary.checkoutOpens} ({summary.ctaClickRate}%)
-                        </span>
-                      </div>
-                      <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-emerald-600"
-                          style={{ width: `${Math.min(100, summary.ctaClickRate)}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              {/* Countries Breakdown Table */}
-              {(activeView === 'overview' || activeView === 'countries') && (
-                <section className="rounded-xl border border-slate-200 bg-white">
-                  <div className="border-b border-slate-200 px-6 py-4">
-                    <h2 className="font-display text-base font-bold text-slate-950">
-                      Visitors by Country
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Geographic distribution resolved from request headers and visitor timezone
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                        <tr>
-                          <th className="px-6 py-3">Country</th>
-                          <th className="px-6 py-3 text-right">Visitors</th>
-                          <th className="px-6 py-3 text-right">Traffic Share</th>
-                          <th className="px-6 py-3 text-right">Button Clicks</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {summary.countryBreakdown.map((row) => (
-                          <tr key={row.countryCode} className="hover:bg-slate-50">
-                            <td className="px-6 py-3 font-medium text-slate-900">
-                              <span className="font-mono text-xs text-slate-500 mr-2">
-                                {row.countryCode}
-                              </span>
-                              {row.countryName}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-900">
-                              {row.visits}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-600">
-                              {row.sharePercent}%
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-700">
-                              {row.ctaClicks}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
-
-              {/* Crucial Buttons Performance Table */}
-              {(activeView === 'overview' || activeView === 'buttons') && (
-                <section className="rounded-xl border border-slate-200 bg-white">
-                  <div className="border-b border-slate-200 px-6 py-4">
-                    <h2 className="font-display text-base font-bold text-slate-950">
-                      Crucial Button Clicks
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Click volume across primary CTAs, video placeholder previews, and workflow
-                      steps
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                        <tr>
-                          <th className="px-6 py-3">Button / Control</th>
-                          <th className="px-6 py-3">Role</th>
-                          <th className="px-6 py-3 text-right">Clicks</th>
-                          <th className="px-6 py-3 text-right">Share of Clicks</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {summary.buttonBreakdown.map((btn) => (
-                          <tr key={btn.buttonId} className="hover:bg-slate-50">
-                            <td className="px-6 py-3 font-medium text-slate-900">{btn.label}</td>
-                            <td className="px-6 py-3 text-xs text-slate-600">
-                              {btn.opensCheckout ? 'Opens Checkout' : 'Engagement / Preview'}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono font-semibold tabular-nums text-slate-950">
-                              {btn.clicks}
-                            </td>
-                            <td className="px-6 py-3 text-right font-mono tabular-nums text-slate-600">
-                              {btn.sharePercent}%
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
-
-              {/* Live Visitor & Interaction Event Log */}
-              {(activeView === 'overview' || activeView === 'events') && (
-                <section className="rounded-xl border border-slate-200 bg-white">
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
-                    <div>
-                      <h2 className="font-display text-base font-bold text-slate-950">
-                        Recent Visitor & Click Timeline
-                      </h2>
-                      <p className="text-xs text-slate-500">
-                        Timestamped visits, country origin, device, and crucial button interactions
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                        <input
-                          type="search"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="Search country, button..."
-                          aria-label="Filter visitor events"
-                          className="rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="flex items-center rounded-lg border border-slate-200 p-0.5 text-xs">
-                        {(
-                          [
-                            ['all', 'All'],
-                            ['page_visit', 'Visits'],
-                            ['cta_click', 'Clicks'],
-                          ] as Array<[EventTypeFilter, string]>
-                        ).map(([id, label]) => (
-                          <button
-                            key={id}
-                            type="button"
-                            onClick={() => setEventFilter(id)}
-                            className={`rounded-md px-2.5 py-1 font-medium cursor-pointer ${
-                              eventFilter === id
-                                ? 'bg-emerald-700 text-white'
-                                : 'text-slate-600 hover:text-slate-950'
+                {(
+                  [
+                    ['Buy buttons (open checkout)', buyButtons],
+                    ['Other buttons', otherButtons],
+                  ] as const
+                ).map(([heading, rows]) => (
+                  <div key={heading}>
+                    <h3 className="bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      {heading}
+                    </h3>
+                    <ul className="divide-y divide-slate-100">
+                      {rows.map((btn) => (
+                        <li
+                          key={btn.buttonId}
+                          className="flex items-baseline justify-between gap-4 px-5 py-3 text-sm sm:px-6"
+                        >
+                          <span className={btn.clicks === 0 ? 'text-slate-400' : 'text-slate-900'}>
+                            {btn.label}
+                          </span>
+                          <span
+                            className={`shrink-0 font-mono tabular-nums ${
+                              btn.clicks === 0 ? 'text-slate-400' : 'font-semibold text-slate-950'
                             }`}
                           >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                            {btn.clicks}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                        <tr>
-                          <th className="px-6 py-3">When</th>
-                          <th className="px-6 py-3">Visitor ID</th>
-                          <th className="px-6 py-3">Event</th>
-                          <th className="px-6 py-3">Country & Timezone</th>
-                          <th className="px-6 py-3">Button / Detail</th>
-                          <th className="px-6 py-3">Source · Device</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredEvents.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="px-6 py-8 text-center text-sm text-slate-500">
-                              No events match your current filter.
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredEvents.map((evt) => {
-                            const badge = eventTypeLabel(evt.type);
-                            return (
-                              <tr key={evt.id} className="hover:bg-slate-50">
-                                <td className="px-6 py-3 font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap">
-                                  {formatEventTimestamp(evt.timestamp)}
-                                </td>
-                                <td className="px-6 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">
-                                  {evt.visitorId}
-                                </td>
-                                <td className={`px-6 py-3 text-xs whitespace-nowrap ${badge.tone}`}>
-                                  {badge.label}
-                                </td>
-                                <td className="px-6 py-3 text-xs text-slate-800 whitespace-nowrap">
-                                  <span className="font-mono text-slate-500 mr-1.5">
-                                    {evt.countryCode}
-                                  </span>
-                                  {evt.countryName}
-                                  <span className="ml-1.5 text-slate-400">({evt.timezone})</span>
-                                </td>
-                                <td className="px-6 py-3 text-xs text-slate-700">
-                                  {evt.buttonLabel || 'Landing page view'}
-                                  {evt.metadata ? ` (${evt.metadata})` : ''}
-                                </td>
-                                <td className="px-6 py-3 text-xs text-slate-500 whitespace-nowrap">
-                                  {evt.referrer} · {evt.device}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
+                ))}
+              </section>
             </>
           )}
 
-          {/* Supabase Integration & SQL Setup Panel */}
-          {activeView === 'supabase' && (
-            <section className="space-y-6">
-              <div className="rounded-xl border border-slate-200 bg-white p-6">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <h2 className="font-display text-base font-bold text-slate-950">
-                      Supabase Project Endpoints & Live Sync
-                    </h2>
-                    <p className="mt-1 text-xs text-slate-600">{supabaseSync.message}</p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 font-mono text-xs font-semibold ${
-                      supabaseSync.mode === 'supabase-rest'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : supabaseSync.mode === 'supabase-public-storage'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {supabaseSync.mode}
-                  </span>
+          {activeView === 'daily' && (
+            <DailyActivity
+              daily={summary.daily}
+              timeZone={summary.timeZone}
+              showTable
+              defaultRange={30}
+            />
+          )}
+
+          {activeView === 'log' && (
+            <section className="rounded-xl border border-slate-200 bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+                <div>
+                  <h2 className="font-display text-base font-bold text-slate-950">
+                    Latest visits and clicks
+                  </h2>
+                  <p className="text-xs text-slate-500">The 50 most recent, newest first</p>
                 </div>
 
-                <dl className="mt-5 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <dt className="font-semibold text-slate-600">Project API URL</dt>
-                    <dd className="mt-1 break-all font-mono text-slate-900">
-                      {supabaseSync.projectUrl}
-                    </dd>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search country, button..."
+                      aria-label="Filter visitor events"
+                      className="rounded-lg border border-slate-200 py-1.5 pl-8 pr-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
+                    />
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <dt className="font-semibold text-slate-600">REST API (PostgREST)</dt>
-                    <dd className="mt-1 break-all font-mono text-slate-900">
-                      {supabaseSync.restUrl}/
-                    </dd>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <dt className="font-semibold text-slate-600">Public Storage API</dt>
-                    <dd className="mt-1 break-all font-mono text-slate-900">
-                      {supabaseSync.storageUrl}/
-                    </dd>
-                  </div>
-                </dl>
-              </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-6">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-display text-base font-bold text-slate-950">
-                      SQL to Create Unprotected Public Analytics & IDs Tables
-                    </h3>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Run this script in your Supabase SQL Editor, then add your Supabase anon
-                      key as <code className="font-mono text-blue-700">SUPABASE_ANON_KEY</code>{' '}
-                      in your hosting environment variables.
-                    </p>
+                  <div className="flex items-center rounded-lg border border-slate-200 p-0.5 text-xs">
+                    {(
+                      [
+                        ['all', 'All'],
+                        ['page_visit', 'Visits'],
+                        ['cta_click', 'Clicks'],
+                      ] as Array<[EventTypeFilter, string]>
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setEventFilter(id)}
+                        className={`rounded-md px-2.5 py-1 font-medium cursor-pointer ${
+                          eventFilter === id
+                            ? 'bg-emerald-700 text-white'
+                            : 'text-slate-600 hover:text-slate-950'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopySql()}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 cursor-pointer"
-                  >
-                    {copiedSql ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    <span>{copiedSql ? 'Copied SQL' : 'Copy SQL'}</span>
-                  </button>
                 </div>
-
-                <pre className="mt-4 max-h-96 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-emerald-200">
-                  <code>{supabaseSql}</code>
-                </pre>
               </div>
+
+              {filteredEvents.length === 0 ? (
+                <p className="px-6 py-8 text-center text-sm text-slate-500">
+                  {summary.recentEvents.length === 0
+                    ? 'Nothing recorded yet.'
+                    : 'No events match your filter.'}
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {filteredEvents.map((evt) => {
+                    const isClick = evt.type === 'cta_click';
+                    return (
+                      <li key={evt.id} className="px-5 py-3 sm:px-6">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p
+                              className={`text-sm font-medium ${
+                                isClick ? 'text-amber-700' : 'text-slate-900'
+                              }`}
+                            >
+                              {isClick
+                                ? `Clicked: ${evt.buttonLabel ?? 'a button'}${
+                                    evt.metadata ? ` (${evt.metadata})` : ''
+                                  }`
+                                : 'Visited the site'}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {evt.countryName} · {evt.device} ·{' '}
+                              {evt.referrer === 'direct' ? 'direct visit' : `from ${evt.referrer}`}
+                            </p>
+                          </div>
+                          <span className="shrink-0 font-mono text-xs text-slate-500 tabular-nums">
+                            {formatEventTimestamp(evt.timestamp)}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </section>
           )}
         </main>

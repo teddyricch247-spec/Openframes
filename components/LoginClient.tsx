@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Lock, ShieldCheck } from 'lucide-react';
+import { markDeviceAsAdmin } from '@/lib/track-client';
 
 export default function LoginClient() {
   const router = useRouter();
@@ -39,6 +40,9 @@ export default function LoginClient() {
         setIsSubmitting(false);
         return;
       }
+
+      // This browser now belongs to an admin: its visits are never counted again.
+      markDeviceAsAdmin();
 
       router.push('/admin');
       router.refresh();

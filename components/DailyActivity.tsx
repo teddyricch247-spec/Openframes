@@ -12,6 +12,8 @@ interface DailyActivityProps {
   timeZone: string;
   /** Show the day-by-day table under the chart */
   showTable?: boolean;
+  /** Range selected when the component first appears */
+  defaultRange?: RangeDays;
 }
 
 function weekdayLabel(dateKey: string): string {
@@ -27,8 +29,13 @@ function sum(rows: DailyBucket[], pick: (row: DailyBucket) => number): number {
   return rows.reduce((total, row) => total + pick(row), 0);
 }
 
-export default function DailyActivity({ daily, timeZone, showTable = true }: DailyActivityProps) {
-  const [range, setRange] = useState<RangeDays>(30);
+export default function DailyActivity({
+  daily,
+  timeZone,
+  showTable = true,
+  defaultRange = 30,
+}: DailyActivityProps) {
+  const [range, setRange] = useState<RangeDays>(defaultRange);
 
   const rows = useMemo(() => daily.slice(-range), [daily, range]);
   const maxValue = Math.max(1, ...rows.map((r) => Math.max(r.newVisitors, r.buttonClicks)));
@@ -46,10 +53,8 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
     <section className="rounded-xl border border-slate-200 bg-white" aria-label="Daily activity">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
         <div>
-          <h2 className="font-display text-base font-bold text-slate-950">Activity by Day</h2>
-          <p className="text-xs text-slate-500">
-            Days run midnight to midnight in {timeZone}. Days with no activity show as zero.
-          </p>
+          <h2 className="font-display text-base font-bold text-slate-950">Visitors per day</h2>
+          <p className="text-xs text-slate-500">Midnight to midnight, {timeZone} time.</p>
         </div>
 
         <div className="flex items-center rounded-lg border border-slate-200 p-0.5 text-xs" role="group" aria-label="Date range">
@@ -73,7 +78,7 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
         <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600">
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-sm bg-emerald-600" />
-            New visitors
+            Visitors
             <span className="font-mono font-semibold text-slate-950 tabular-nums">{totals.newVisitors}</span>
           </span>
           <span className="inline-flex items-center gap-1.5">
@@ -91,7 +96,7 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
           <div
             className="flex h-44 items-end gap-px border-b border-slate-200 pl-6"
             role="img"
-            aria-label={`Bar chart of new visitors and button clicks per day for the last ${range} days`}
+            aria-label={`Bar chart of visitors and button clicks per day for the last ${range} days`}
           >
             {rows.map((row) => {
               const visitorPct = (row.newVisitors / maxValue) * 100;
@@ -100,7 +105,7 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
                 <div
                   key={row.date}
                   className="flex h-full min-w-0 flex-1 items-end justify-center gap-px"
-                  title={`${weekdayLabel(row.date)}: ${row.newVisitors} new visitors, ${row.activeVisitors} active, ${row.buttonClicks} clicks`}
+                  title={`${weekdayLabel(row.date)}: ${row.newVisitors} visitors, ${row.buttonClicks} button clicks`}
                 >
                   <div
                     className={`w-1/2 max-w-[14px] rounded-t-sm ${row.newVisitors > 0 ? 'bg-emerald-600' : 'bg-slate-200'}`}
@@ -137,19 +142,17 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
               <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
                 <tr>
                   <th className="px-6 py-3">Day</th>
-                  <th className="px-6 py-3 text-right">New visitors</th>
-                  <th className="px-6 py-3 text-right">Active visitors</th>
-                  <th className="px-6 py-3 text-right">Button clicks</th>
-                  <th className="px-6 py-3 text-right">Checkout opens</th>
+                  <th className="px-4 py-3 text-right sm:px-6">Visitors</th>
+                  <th className="px-4 py-3 text-right sm:px-6">Button clicks</th>
+                  <th className="px-4 py-3 text-right sm:px-6">Buy-button clicks</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 <tr className="bg-emerald-50/60 font-semibold text-slate-950">
-                  <td className="px-6 py-3">Total, last {range} days</td>
-                  <td className="px-6 py-3 text-right font-mono tabular-nums">{totals.newVisitors}</td>
-                  <td className="px-6 py-3 text-right font-mono text-slate-400 tabular-nums">-</td>
-                  <td className="px-6 py-3 text-right font-mono tabular-nums">{totals.buttonClicks}</td>
-                  <td className="px-6 py-3 text-right font-mono tabular-nums">{totals.checkoutOpens}</td>
+                  <td className="px-4 py-3 sm:px-6">Total, last {range} days</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums sm:px-6">{totals.newVisitors}</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums sm:px-6">{totals.buttonClicks}</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums sm:px-6">{totals.checkoutOpens}</td>
                 </tr>
                 {tableRows.map((row) => {
                   const isToday = row.date === todayKey;
@@ -157,7 +160,7 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
                     value === 0 ? 'text-slate-400' : 'font-semibold text-slate-950';
                   return (
                     <tr key={row.date} className="hover:bg-slate-50">
-                      <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">
+                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900 sm:px-6">
                         {weekdayLabel(row.date)}
                         {isToday && (
                           <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
@@ -165,16 +168,13 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
                           </span>
                         )}
                       </td>
-                      <td className={`px-6 py-3 text-right font-mono tabular-nums ${cell(row.newVisitors)}`}>
+                      <td className={`px-4 py-3 text-right font-mono tabular-nums sm:px-6 ${cell(row.newVisitors)}`}>
                         {row.newVisitors}
                       </td>
-                      <td className={`px-6 py-3 text-right font-mono tabular-nums ${cell(row.activeVisitors)}`}>
-                        {row.activeVisitors}
-                      </td>
-                      <td className={`px-6 py-3 text-right font-mono tabular-nums ${cell(row.buttonClicks)}`}>
+                      <td className={`px-4 py-3 text-right font-mono tabular-nums sm:px-6 ${cell(row.buttonClicks)}`}>
                         {row.buttonClicks}
                       </td>
-                      <td className={`px-6 py-3 text-right font-mono tabular-nums ${cell(row.checkoutOpens)}`}>
+                      <td className={`px-4 py-3 text-right font-mono tabular-nums sm:px-6 ${cell(row.checkoutOpens)}`}>
                         {row.checkoutOpens}
                       </td>
                     </tr>
@@ -184,8 +184,8 @@ export default function DailyActivity({ daily, timeZone, showTable = true }: Dai
             </table>
           </div>
           <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-500">
-            New visitors counts a device once, on its first visit. Active visitors counts everyone with a recorded
-            visit or click that day, so returning visitors appear there when they click.
+            Each visitor is counted once, on their first visit. Buy-button clicks are the clicks that open the
+            checkout.
           </p>
         </div>
       )}

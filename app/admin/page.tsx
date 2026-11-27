@@ -3,7 +3,6 @@ import AdminDashboardClient from '@/components/AdminDashboardClient';
 import { getServerAdminSession } from '@/lib/admin-auth';
 import { computeAnalyticsSummary } from '@/lib/analytics';
 import { getAllAnalyticsEvents, getSupabaseSyncInfo } from '@/lib/analytics-store';
-import { SUPABASE_SETUP_SQL } from '@/lib/supabase-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +21,6 @@ export default async function AdminPage() {
       initialSummary={initialSummary}
       sessionUsername={session.sub}
       initialSupabaseSync={supabaseSync}
-      supabaseSql={SUPABASE_SETUP_SQL}
     />
   );
 }

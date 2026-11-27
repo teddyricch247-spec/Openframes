@@ -1,5 +1,11 @@
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAdminSession, verifySameOriginRequest } from '@/lib/admin-auth';
+import {
+  IGNORE_DEVICE_COOKIE,
+  isLikelyBotUserAgent,
+  isValidVisitorId,
+} from '@/lib/bot-detection';
 import {
   BUTTON_LABELS,
   computeAnalyticsSummary,
@@ -13,8 +19,27 @@ import {
   appendAnalyticsEvent,
   getAllAnalyticsEvents,
   getSupabaseSyncInfo,
+  hasPageVisitWithFingerprint,
   resetAnalyticsStore,
 } from '@/lib/analytics-store';
+
+/** One-way hash of IP + user agent + coarse browser traits. The raw IP is never stored. */
+function buildFingerprint(req: NextRequest, hints: unknown): string {
+  const forwarded = req.headers.get('x-forwarded-for') ?? '';
+  const ip = forwarded.split(',')[0]?.trim() || req.headers.get('x-real-ip') || '';
+  const userAgent = req.headers.get('user-agent') ?? '';
+  const hintText = typeof hints === 'string' ? hints.slice(0, 80) : '';
+  const salt = process.env.SESSION_SECRET || 'openframe-visitor-fingerprint';
+  return crypto
+    .createHash('sha256')
+    .update(`${salt}|${ip}|${userAgent}|${hintText}`, 'utf8')
+    .digest('hex')
+    .slice(0, 24);
+}
+
+function ignored(reason: string) {
+  return NextResponse.json({ ok: true, ignored: reason }, { status: 200 });
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerAdminSession();
@@ -43,6 +68,7 @@ export async function POST(req: NextRequest) {
       visitorId?: string;
       timezone?: string;
       referrer?: string;
+      hints?: string;
       buttonId?: CrucialButtonId;
       metadata?: string;
     };
@@ -50,6 +76,30 @@ export async function POST(req: NextRequest) {
     const eventType = body.type;
     if (eventType !== 'page_visit' && eventType !== 'cta_click') {
       return NextResponse.json({ error: 'Invalid analytics event type' }, { status: 400 });
+    }
+
+    // Never count the admin: not while logged in, and not from a browser that ever logged in.
+    if (req.cookies.get(IGNORE_DEVICE_COOKIE)?.value === '1') {
+      return ignored('admin-device');
+    }
+    if (await getServerAdminSession()) {
+      return ignored('admin-session');
+    }
+
+    // Never count crawlers, link previews, monitors or scripts.
+    const userAgent = req.headers.get('user-agent');
+    if (isLikelyBotUserAgent(userAgent)) {
+      return ignored('bot');
+    }
+
+    // The tracking client always sends a visitor id it generated. No id, no count.
+    if (!isValidVisitorId(body.visitorId)) {
+      return ignored('invalid-visitor');
+    }
+
+    const fingerprint = buildFingerprint(req, body.hints);
+    if (eventType === 'page_visit' && (await hasPageVisitWithFingerprint(fingerprint))) {
+      return ignored('already-counted');
     }
 
     const headerCountry =
@@ -64,8 +114,8 @@ export async function POST(req: NextRequest) {
       acceptLanguage: req.headers.get('accept-language'),
     });
 
-    const device = detectDeviceType(req.headers.get('user-agent'));
-    const visitorId = (body.visitorId || `vis-${Date.now()}`).slice(0, 64);
+    const device = detectDeviceType(userAgent);
+    const visitorId = body.visitorId;
 
     const event: AnalyticsEvent = {
       id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -80,11 +130,12 @@ export async function POST(req: NextRequest) {
       buttonId: body.buttonId,
       buttonLabel: body.buttonId ? BUTTON_LABELS[body.buttonId] ?? body.buttonId : undefined,
       metadata: body.metadata?.slice(0, 120),
+      fingerprint: eventType === 'page_visit' ? fingerprint : undefined,
     };
 
     await appendAnalyticsEvent(event);
 
-    return NextResponse.json({ ok: true, event }, { status: 201 });
+    return NextResponse.json({ ok: true }, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Malformed analytics payload' }, { status: 400 });
   }
