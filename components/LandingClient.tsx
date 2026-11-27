@@ -1,17 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import TopNav from './TopNav';
 import HeroSection from './HeroSection';
 import CurriculumAndFaqSection from './CurriculumAndFaqSection';
 import VideoPreviewModal from './VideoPreviewModal';
-import CheckoutModal from './CheckoutModal';
+import CheckoutPage from './CheckoutPage';
 import { HERO_VIDEO_PLACEHOLDERS, type HeroVideoPlaceholder } from '@/lib/guide-data';
-import {
-  calculateBlackFridayPricing,
-  getCountdownToBlackFriday,
-} from '@/lib/pricing';
+import { calculateSalePricing, getSaleCountdown } from '@/lib/pricing';
+import { resolveFlashSaleEndMs } from '@/lib/flash-sale';
+import { CHECKOUT_HASH } from '@/lib/whop';
 import type { CrucialButtonId } from '@/lib/analytics';
 import { trackAnalyticsEvent, trackVisitWhenHuman } from '@/lib/track-client';
 
@@ -21,18 +20,22 @@ interface LandingClientProps {
 
 export default function LandingClient({ initialTimestampMs }: LandingClientProps) {
   const [nowMs, setNowMs] = useState<number>(initialTimestampMs);
+  // This visitor's own flash-sale deadline. Stays null while Black Friday is still running.
+  const [flashEndMs, setFlashEndMs] = useState<number | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<HeroVideoPlaceholder | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const visitLoggedRef = useRef(false);
+  const checkoutHashPushedRef = useRef(false);
 
-  // Live 1s countdown tick
+  // Live 1s tick: updates the clock and rolls the flash sale (start / reset at 00:00) in the same update
   useEffect(() => {
-    const firstTick = window.setTimeout(() => {
-      setNowMs(Date.now());
-    }, 0);
-    const id = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
+    const sync = () => {
+      const now = Date.now();
+      setNowMs(now);
+      setFlashEndMs(resolveFlashSaleEndMs(now));
+    };
+    const firstTick = window.setTimeout(sync, 0);
+    const id = window.setInterval(sync, 1000);
     return () => {
       window.clearTimeout(firstTick);
       window.clearInterval(id);
@@ -46,12 +49,49 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
     trackVisitWhenHuman();
   }, []);
 
-  const pricing = calculateBlackFridayPricing(nowMs);
-  const countdown = getCountdownToBlackFriday(nowMs);
+  // The payment page follows the URL hash (#checkout), so the browser Back button closes it
+  // and a direct link to /#checkout opens it.
+  useEffect(() => {
+    const syncFromHash = () => {
+      const isCheckoutHash = window.location.hash === CHECKOUT_HASH;
+      if (!isCheckoutHash) checkoutHashPushedRef.current = false;
+      setCheckoutOpen(isCheckoutHash);
+    };
+    const firstSync = window.setTimeout(syncFromHash, 0);
+    window.addEventListener('hashchange', syncFromHash);
+    return () => {
+      window.clearTimeout(firstSync);
+      window.removeEventListener('hashchange', syncFromHash);
+    };
+  }, []);
+
+  const pricing = calculateSalePricing(nowMs, flashEndMs);
+  const countdown = getSaleCountdown(nowMs, flashEndMs);
+
+  const openCheckout = () => {
+    if (window.location.hash !== CHECKOUT_HASH) {
+      checkoutHashPushedRef.current = true;
+      window.location.hash = CHECKOUT_HASH;
+    }
+    setCheckoutOpen(true);
+  };
+
+  const closeCheckout = useCallback(() => {
+    setCheckoutOpen(false);
+    if (window.location.hash !== CHECKOUT_HASH) return;
+    if (checkoutHashPushedRef.current) {
+      // We added the history entry ourselves, so step back out of it
+      checkoutHashPushedRef.current = false;
+      window.history.back();
+    } else {
+      // Page was opened straight on /#checkout: drop the hash without leaving the site
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   const handleOpenCheckout = (buttonId: CrucialButtonId) => {
     void trackAnalyticsEvent({ type: 'cta_click', buttonId });
-    setCheckoutOpen(true);
+    openCheckout();
   };
 
   const handleSelectPlaceholder = (item: HeroVideoPlaceholder) => {
@@ -97,7 +137,7 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
         >
           <span>
             {pricing.isSaleActive
-              ? `Claim Black Friday Access — $${pricing.effectivePrice}`
+              ? `Claim ${pricing.saleAccessLabel} — $${pricing.effectivePrice}`
               : `Get the Guide — $${pricing.effectivePrice}`}
           </span>
           {pricing.isSaleActive && (
@@ -105,9 +145,11 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
               ${pricing.regularPrice}
             </span>
           )}
-          <span className="hidden text-xs font-medium text-blue-100 sm:inline">
-            · Black Friday Sale
-          </span>
+          {pricing.isSaleActive && (
+            <span className="hidden text-xs font-medium text-blue-100 sm:inline">
+              · {pricing.saleName}
+            </span>
+          )}
           <ArrowRight className="h-4 w-4 shrink-0" />
         </button>
       </div>
@@ -119,10 +161,12 @@ export default function LandingClient({ initialTimestampMs }: LandingClientProps
         onGetGuide={() => handleOpenCheckout('modal_get_guide')}
       />
 
-      <CheckoutModal
+      {/* Payment page: always mounted and pre-loading, just hidden until a buy button is clicked */}
+      <CheckoutPage
         isOpen={checkoutOpen}
         pricing={pricing}
-        onClose={() => setCheckoutOpen(false)}
+        countdown={countdown}
+        onClose={closeCheckout}
       />
     </div>
   );

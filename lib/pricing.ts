@@ -3,6 +3,8 @@ export const BLACK_FRIDAY_PRICE_USD = 17;
 // Local date-time string (no fixed timezone offset) so Black Friday always ends at 11:59:59 PM in the user's local timezone.
 export const BLACK_FRIDAY_END_ISO = '2026-11-27T23:59:59';
 
+export type SaleKind = 'black_friday' | 'flash';
+
 export interface PricingSummary {
   regularPrice: number;
   salePrice: number;
@@ -10,6 +12,12 @@ export interface PricingSummary {
   discountPercent: number;
   isSaleActive: boolean;
   effectivePrice: number;
+  /** Which sale is running: the one-off Black Friday sale, or the per-visitor rolling flash sale after it. */
+  saleKind: SaleKind;
+  /** Short name for badges and countdown labels, e.g. "Black Friday Sale" or "Flash Sale". */
+  saleName: string;
+  /** Used in button copy: "Claim {saleAccessLabel} — $17". */
+  saleAccessLabel: string;
 }
 
 export interface CountdownBreakdown {
@@ -56,12 +64,8 @@ export function parseEndTimestampMs(endSpec: string = BLACK_FRIDAY_END_ISO): num
   return new Date(endSpec).getTime();
 }
 
-export function getCountdownToBlackFriday(
-  nowMs: number,
-  endIso: string = BLACK_FRIDAY_END_ISO
-): CountdownBreakdown {
-  const endMs = parseEndTimestampMs(endIso);
-  const diff = Math.max(0, endMs - nowMs);
+function breakdownFromDiffMs(diffMs: number): CountdownBreakdown {
+  const diff = Math.max(0, diffMs);
 
   if (diff <= 0) {
     return {
@@ -88,12 +92,14 @@ export function getCountdownToBlackFriday(
   };
 }
 
-export function calculateBlackFridayPricing(
+export function getCountdownToBlackFriday(
   nowMs: number,
   endIso: string = BLACK_FRIDAY_END_ISO
-): PricingSummary {
-  const endMs = parseEndTimestampMs(endIso);
-  const isSaleActive = nowMs < endMs;
+): CountdownBreakdown {
+  return breakdownFromDiffMs(parseEndTimestampMs(endIso) - nowMs);
+}
+
+function buildPricing(isSaleActive: boolean, saleKind: SaleKind): PricingSummary {
   const savingsAmount = isSaleActive ? REGULAR_PRICE_USD - BLACK_FRIDAY_PRICE_USD : 0;
   const discountPercent = isSaleActive
     ? Math.round((savingsAmount / REGULAR_PRICE_USD) * 100)
@@ -106,7 +112,46 @@ export function calculateBlackFridayPricing(
     discountPercent,
     isSaleActive,
     effectivePrice: isSaleActive ? BLACK_FRIDAY_PRICE_USD : REGULAR_PRICE_USD,
+    saleKind,
+    saleName: saleKind === 'flash' ? 'Flash Sale' : 'Black Friday Sale',
+    saleAccessLabel: saleKind === 'flash' ? 'Flash Sale Access' : 'Black Friday Access',
   };
+}
+
+export function calculateBlackFridayPricing(
+  nowMs: number,
+  endIso: string = BLACK_FRIDAY_END_ISO
+): PricingSummary {
+  return buildPricing(nowMs < parseEndTimestampMs(endIso), 'black_friday');
+}
+
+/**
+ * Pricing for whichever sale is running right now.
+ * - Before Black Friday ends: the Black Friday sale.
+ * - After it ends: the visitor's own flash sale, which ends at `flashEndMs` (see lib/flash-sale.ts).
+ */
+export function calculateSalePricing(
+  nowMs: number,
+  flashEndMs: number | null,
+  endIso: string = BLACK_FRIDAY_END_ISO
+): PricingSummary {
+  if (nowMs < parseEndTimestampMs(endIso)) {
+    return buildPricing(true, 'black_friday');
+  }
+  return buildPricing(flashEndMs !== null && nowMs < flashEndMs, 'flash');
+}
+
+/** Countdown for whichever sale is running right now (same rules as calculateSalePricing). */
+export function getSaleCountdown(
+  nowMs: number,
+  flashEndMs: number | null,
+  endIso: string = BLACK_FRIDAY_END_ISO
+): CountdownBreakdown {
+  const blackFridayEndMs = parseEndTimestampMs(endIso);
+  if (nowMs < blackFridayEndMs) {
+    return breakdownFromDiffMs(blackFridayEndMs - nowMs);
+  }
+  return breakdownFromDiffMs((flashEndMs ?? nowMs) - nowMs);
 }
 
 export function formatPadTwo(value: number): string {

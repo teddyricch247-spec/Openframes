@@ -38,6 +38,18 @@ Key files in `lib/`:
 - `admin-auth.ts` admin login and session handling
 - `supabase-config.ts` Supabase URLs, table and bucket names, and the setup SQL
 - `pricing.ts`, `guide-data.ts` site content
+- `flash-sale.ts` per-visitor rolling flash sale (see "Checkout and sales")
+- `whop.ts` Whop plan id, loader URL and the `#checkout` hash
+
+## Checkout and sales
+
+- **Payment page:** `components/CheckoutPage.tsx` is a full-screen payment "page" that is always mounted inside the landing page (rendered by `LandingClient`). It embeds the Whop checkout for plan `plan_sAwl4XRuK5cR9` (set in `lib/whop.ts`) using Whop's `loader.js` and starts loading right after the page hydrates. It is only hidden (`visibility` + `opacity`, never `display:none` or unmounted), so clicking any buy button just reveals the already-loaded checkout. Don't change it to conditional rendering or it will load slowly again.
+- Opening it sets the URL hash to `#checkout`, so the browser Back button closes it and `/#checkout` opens it directly.
+- `components/CheckoutModal.tsx` (the old fake name/email form) is no longer used and can be deleted.
+- **The price Whop charges comes from the Whop plan, not from this site.** The site shows $17 (sale) / $47 (regular). Keep the Whop plan price in line with what the site displays.
+- **Black Friday sale:** ends at `BLACK_FRIDAY_END_ISO` in `lib/pricing.ts` (11:59:59 PM, viewer's local time).
+- **Flash sale (after Black Friday):** `lib/flash-sale.ts`. Once Black Friday has ended, each visitor gets their own random 24h to 48h sale window, saved in `localStorage` under `openframe_flash_sale_end`. When it reaches 00:00 a new random window starts, forever. Price stays $17 while a sale is running. This is a temporary design the owner plans to revisit.
+- `LandingClient` ticks every second and passes `calculateSalePricing` / `getSaleCountdown` results down. Sale names in the UI come from `pricing.saleName` and `pricing.saleAccessLabel`, not hardcoded text.
 
 ## Environment variables (set in Vercel, Production and Preview)
 

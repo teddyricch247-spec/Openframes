@@ -338,13 +338,13 @@ export default function HeroSection({
           ))}
         </div>
 
-        {/* 2. BLACK FRIDAY OFFER & HEADLINE STAGE (Takes nearly full 9:16 mobile screen on scroll) */}
+        {/* 2. SALE OFFER & HEADLINE STAGE (Takes nearly full 9:16 mobile screen on scroll) */}
         <div
           data-testid="mobile-offer-stage"
           className="mx-auto flex min-h-[calc(100svh-4rem)] max-w-4xl flex-col items-center justify-center py-12 text-center lg:mt-8 lg:min-h-0 lg:py-0"
         >
           <div className="inline-flex flex-wrap items-center justify-center rounded-full border border-slate-900/12 bg-white/95 px-4 py-1.5 text-xs font-semibold text-slate-900 shadow-sm sm:text-sm">
-            <span>Black Friday Sale • </span>
+            <span>{pricing.saleName} • </span>
             <span className="ml-1 font-mono font-bold text-blue-700 tabular-nums">
               {pricing.isSaleActive
                 ? `Save $${pricing.savingsAmount} (${pricing.discountPercent}% off)`
@@ -390,7 +390,7 @@ export default function HeroSection({
                 {countdown.isExpired ? 'Offer ended' : 'Sale ends in:'}
               </span>
               <span
-                aria-label="Black Friday countdown"
+                aria-label={`${pricing.saleName} countdown`}
                 className="font-mono text-sm font-bold text-sky-300 tabular-nums whitespace-nowrap"
               >
                 {formatPadTwo(countdown.days)}d : {formatPadTwo(countdown.hours)}h :{' '}

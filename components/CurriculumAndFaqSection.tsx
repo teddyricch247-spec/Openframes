@@ -134,7 +134,7 @@ export default function CurriculumAndFaqSection({
               onClick={onOpenCheckout}
               className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-blue-600 px-7 py-3.5 text-base font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 whitespace-nowrap cursor-pointer"
             >
-              <span>Claim Black Friday Access — ${pricing.effectivePrice}</span>
+              <span>Claim {pricing.saleAccessLabel} — ${pricing.effectivePrice}</span>
               {pricing.isSaleActive && (
                 <span className="font-mono text-sm font-normal text-blue-200 line-through tabular-nums">
                   ${pricing.regularPrice}
